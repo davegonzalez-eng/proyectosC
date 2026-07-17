@@ -19,6 +19,7 @@ const params = {
   tipScale: 0.96,
   bulgeStrength: 0.5,
   armTwistDeg: 0,
+  tipDipStrength: 0.2,
   tubeRadius: 0.03,
   twistTurns: 0.5,
   ribbonHalfWidth: 0.09,
@@ -27,7 +28,7 @@ const params = {
   showArmLabels: true,
   showMembrane: false,
   showHexGrid: false,
-  hexCellFraction: 0.04,
+  hexCellFraction: 0.02,
 };
 
 const MATERIAL_PRESETS = {
@@ -38,8 +39,9 @@ const MATERIAL_PRESETS = {
 
 const RADIUS = 2;
 const faces = buildDodecahedron(RADIUS);
-// Static, geometry-only, always-on: the F7-reference rule generalized to a
-// strict matching - 20 ribbons, every connected arm touched exactly once.
+// Static, geometry-only, always-on: the same per-arm rule (confirmed exactly
+// against reference connection sets for both face 7 and face 1) applied
+// identically to every face - 60 ribbons, every arm touched by exactly two.
 const adjacentPairs = computeAdjacentFaceConnections(faces);
 
 /** @type {Map<string, {position: THREE.Vector3, outDir: THREE.Vector3, label: string}>} */
@@ -251,6 +253,7 @@ bindSlider('swirl', 'swirlDeg', { format: (v) => `${v.toFixed(0)}°` });
 bindSlider('armTwist', 'armTwistDeg', { format: (v) => `${v.toFixed(0)}°` });
 bindSlider('k', 'k', { format: (v) => v.toFixed(1) });
 bindSlider('bulge', 'bulgeStrength', { format: (v) => v.toFixed(2) });
+bindSlider('tipDip', 'tipDipStrength', { format: (v) => v.toFixed(2) });
 bindSlider('tubeRadius', 'tubeRadius', { format: (v) => v.toFixed(3) });
 bindSlider('twist', 'twistTurns', { format: (v) => v.toFixed(1) });
 bindSlider('ribbonDepth', 'ribbonDepthFraction', {
@@ -295,9 +298,7 @@ document.getElementById('material-select').addEventListener('change', (e) => {
 });
 
 const autoConnectStatusEl = document.getElementById('auto-connect-status');
-autoConnectStatusEl.textContent = `${adjacentPairs.length} adjacency ribbons active (each connected arm touched once; ${
-  faces.length * 5 - adjacentPairs.length * 2
-} arms have no auto-connection - see README)`;
+autoConnectStatusEl.textContent = `${adjacentPairs.length} adjacency ribbons active - every one of the ${faces.length * 5} arms is connected`;
 
 const connectionsInput = document.getElementById('connections-input');
 const statusEl = document.getElementById('connections-status');

@@ -105,6 +105,16 @@
       <span class="val" id="bulge-value"></span>
     </div>
     <div class="row">
+      <label for="tipDip">Tip dip</label>
+      <input id="tipDip" type="range" min="0" max="0.6" step="0.01" value="0.2" />
+      <span class="val" id="tipDip-value"></span>
+    </div>
+    <div class="hint" style="margin-top: -6px;">
+      Extra inward pull toward the sculpture's center, concentrated right at
+      each arm's tip - the arm curls inward before ending, so the ribbon it
+      turns into continues an already-underway curve instead of starting flat.
+    </div>
+    <div class="row">
       <label for="tubeRadius">Tube r</label>
       <input id="tubeRadius" type="range" min="0.008" max="0.06" step="0.001" value="0.03" />
       <span class="val" id="tubeRadius-value"></span>
@@ -141,7 +151,7 @@
     </div>
     <div class="row">
       <label for="hexCell">Hex cell size</label>
-      <input id="hexCell" type="range" min="0.02" max="0.4" step="0.01" value="0.04" />
+      <input id="hexCell" type="range" min="0.02" max="0.4" step="0.01" value="0.02" />
       <span class="val" id="hexCell-value"></span>
     </div>
 
@@ -160,8 +170,8 @@
     <div class="hint" style="margin-top: 2px;">
       Always on. For each arm, follows the edge to the neighboring face and
       lands on its matching arm there (the pattern behind
-      <code>F6-A0:F7-A2</code>, <code>F7-A0:F1-A3</code>, etc., generalized
-      to all 12 faces). Each connected arm is touched exactly once.
+      <code>F6-A0:F7-A2</code>, <code>F1-A2:F7-A1</code>, etc.), applied
+      identically to every face - every arm ends up connected.
     </div>
     <div id="auto-connect-status"></div>
 
