@@ -113,21 +113,35 @@ A true printable/cast curved-surface export is out of scope for this pass.
 
 ### 7. Ribbon connectors
 
-Given two arm labels, `src/ribbon.js:buildRibbon()` connects their tip
-positions with a cubic Bézier. Each control point first follows that tip's
-own outward direction a short distance (so the ribbon reads as a
-continuation of the arm), then is pulled *inward*, toward the sphere's
-center, well past the control point's own radius — so the bulk of the curve
-passes **under** the surrounding stars, at a lower radius than the surface
-geometry, instead of arcing above it. It's a woven, over-under look rather
-than tendrils floating over the body.
+Given two arm labels, `src/ribbon.js:buildRibbon()` threads their tip
+positions onto a 5-point Catmull-Rom spline: `tip → leave point → dip point →
+leave point → tip`. Catmull-Rom passes exactly through every one of those
+points (unlike Bézier control points, which only pull the curve without
+touching it), which buys two precise guarantees:
 
-A twisted flat strip is then built along that curve using Frenet frames plus
-a continuously increasing twist angle (**Ribbon twist** slider, in full
-turns; default **0.5**, i.e. a single half-turn — kept low on purpose so the
-strip doesn't fight itself visually along the length of 60 simultaneous
-ribbons). Ends are tapered to a near-point so they blend into the star's
-tube instead of showing a flat cut face.
+- **Tangent match at the join.** Each "leave" point sits a short distance
+  along that tip's *own* outward direction, so the curve's tangent right at
+  the tip is pinned to within a fraction of a degree of `outDir` — the same
+  direction the star's own tube trends as it reaches that tip — instead of
+  bending off at an angle. (Verified numerically: worst-case misalignment
+  across all 60 auto-connect ribbons is 0.3°.)
+- **Exact dip depth.** The middle "dip" point is placed at a precise target
+  radius from the sculpture's center: `depthFraction × avgRadius`, where
+  `avgRadius` is the average of the two tips' own distance from center.
+  Default `depthFraction = 0.9` — the ribbon's lowest point sits at 90% of
+  the face's radius, i.e. only dips 10% of the way toward the center, just
+  barely ducking under the surface rather than diving deep into the body.
+  (Verified numerically: min/max/avg depth ratio across all 60 ribbons is
+  exactly 0.900.) Tunable via the **Ribbon depth** slider (50–100%).
+
+The cross-section also blends smoothly: its half-width starts at
+`tubeRadius` (matching the star tube's own thickness) right at each tip and
+widens to the full ribbon width only in the middle, so there's no jump in
+apparent thickness at the join — no more thin thread poking out of a fat
+tube. A twisted flat strip is then built along the curve using Frenet frames
+plus a continuously increasing twist angle (**Ribbon twist** slider, in full
+turns; default **0.5**, a single half-turn — kept low so the strip doesn't
+fight itself visually across 60 simultaneous ribbons).
 
 ### 8. Specifying connections
 
@@ -163,16 +177,29 @@ Connect `F`'s arm `m` to `G`'s arm at that shared `(m+2)` vertex
 faces × 5 arms this produces **60 unique ribbons**, with every one of the 60
 arms touched by exactly two of them — verified to reproduce the reference
 set exactly when `F = 7`. Manual connections from the text box are kept and
-merged (de-duplicated) with the auto-generated set.
+merged (de-duplicated) with the auto-generated set. **On by default** so the
+full lattice is there the moment the page loads.
 
-### 10. Membrane mode
+### 10. Filling the star interior: solid membrane or hex grid
 
-The **Fill star interior (thin surface)** checkbox triangulates each star's
-10-point outline (`THREE.ShapeUtils.triangulateShape` on the same local 2D
-`(u, w)` coordinates used to place the outline, via `src/membrane.js`) and
-renders it as a thin double-sided panel. Because it's built from the exact
-same (already swirled/waved/twisted/bulged) points the tube is drawn
-through, its edge sits flush against the inside of the tube with no seam.
+Two mutually-exclusive checkboxes (checking one unchecks the other):
+
+- **Fill star interior (thin surface)** triangulates each star's 10-point
+  outline (`THREE.ShapeUtils.triangulateShape` on the same local 2D `(u, w)`
+  coordinates used to place the outline, via `src/membrane.js`) into a thin
+  double-sided panel.
+- **Fill star interior (hex grid)** (`src/hexgrid.js`) tiles a pointy-top
+  hexagonal grid across the same local 2D coordinates, clips each hex edge
+  against the star's (concave) outline using a generic segment/polygon
+  clip - not just an inside/outside test, so partial cells along the
+  boundary are cut cleanly rather than dropped or left overhanging - and
+  turns every surviving strut into a thin quad in 3D, following the star's
+  own bulge-along-normal profile. Cell size is tunable via the **Hex cell
+  size** slider.
+
+Both modes are built from the exact same (already swirled/waved/twisted/
+bulged) points the tube is drawn through, so their boundary sits flush
+against the inside of the tube with no seam.
 
 ### 11. Materials
 
@@ -194,8 +221,9 @@ flat and dark.
 ```
 index.html            page shell, control panel, import map
 src/geometry.js        dodecahedron construction, per-face star math, adjacency-connection rule
-src/ribbon.js          twisted ribbon geometry (dips under the surface) between two arm tips
+src/ribbon.js          spline-based ribbon geometry (precise dip depth + tangent-matched joins) between two arm tips
 src/membrane.js         thin triangulated fill surface for a star's interior
+src/hexgrid.js           clipped hexagonal-grid fill surface for a star's interior
 src/main.js             Three.js scene, materials/environment, UI wiring, labels, picking, render loop
 vendor/three/           vendored Three.js build + OrbitControls + CSS2DRenderer + RoomEnvironment (no CDN/network dependency)
 ```
@@ -208,12 +236,17 @@ vendor/three/           vendored Three.js build + OrbitControls + CSS2DRenderer 
 - `computeAdjacentFaceConnections()` checked standalone under Node: exactly
   reproduces the 5-pair face-7 reference set, and generalizes to 60 unique
   pairs with every arm at degree 2.
-- Star outline triangulation (`buildMembrane`) checked standalone: an 8-triangle
-  fan from the 10-point star outline, as expected for a simple decagon.
+- `buildRibbon()` checked standalone under Node across all 60 auto-connect
+  pairs: depth ratio (min radius along the curve ÷ average endpoint radius)
+  is exactly 0.900 in every case (min/max/avg all 0.900), and worst-case
+  tangent misalignment at a tip is 0.3°.
+- Star outline triangulation (`buildMembrane`) and hex-grid clipping
+  (`buildHexGrid`) checked standalone: expected triangle counts, no NaNs.
 - Full app checked in headless Chromium: renders with zero console errors;
-  every slider (swirl/arm-twist/k/bulge/tube radius/twist) and toggle
-  (membrane, auto-connect, material) visibly does what it says, including
-  chrome/titanium reflections from the generated environment.
+  every slider (swirl/arm-twist/k/bulge/tube radius/twist/ribbon depth/hex
+  cell size) and toggle (membrane, hex grid, auto-connect, material)
+  visibly does what it says, including mutual exclusion between the two
+  fill modes and chrome/titanium reflections from the generated environment.
 
 ## Possible next steps
 

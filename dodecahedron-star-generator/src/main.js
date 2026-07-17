@@ -5,6 +5,7 @@ import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, buildStar, computeAdjacentFaceConnections } from './geometry.js';
 import { buildRibbon } from './ribbon.js';
 import { buildMembrane } from './membrane.js';
+import { buildHexGrid } from './hexgrid.js';
 
 // ---------------------------------------------------------------------
 // State
@@ -21,10 +22,13 @@ const params = {
   tubeRadius: 0.04,
   twistTurns: 0.5,
   ribbonHalfWidth: 0.09,
+  ribbonDepthFraction: 0.9,
   showFaceLabels: true,
   showArmLabels: true,
   showMembrane: false,
-  autoConnectAdjacent: false,
+  showHexGrid: false,
+  hexCellFraction: 0.22,
+  autoConnectAdjacent: true,
 };
 
 const MATERIAL_PRESETS = {
@@ -131,7 +135,13 @@ function rebuildStars() {
     const tubeGeom = new THREE.TubeGeometry(curve, 200, params.tubeRadius, 8, true);
     starsGroup.add(new THREE.Mesh(tubeGeom, sculptureMaterial));
 
-    if (params.showMembrane) {
+    if (params.showHexGrid) {
+      const hexGeom = buildHexGrid(face, star, {
+        cellFraction: params.hexCellFraction,
+        bulgeStrength: params.bulgeStrength,
+      });
+      membraneGroup.add(new THREE.Mesh(hexGeom, sculptureMaterial));
+    } else if (params.showMembrane) {
       const membraneGeom = buildMembrane(star);
       membraneGroup.add(new THREE.Mesh(membraneGeom, sculptureMaterial));
     }
@@ -191,7 +201,9 @@ function rebuildRibbons() {
     if (!tipA || !tipB) continue;
     const { geometry } = buildRibbon(tipA, tipB, {
       halfWidth: params.ribbonHalfWidth,
+      tubeRadius: params.tubeRadius,
       twistTurns: params.twistTurns,
+      depthFraction: params.ribbonDepthFraction,
     });
     ribbonsGroup.add(new THREE.Mesh(geometry, sculptureMaterial));
   }
@@ -240,6 +252,11 @@ bindSlider('k', 'k', { format: (v) => v.toFixed(1) });
 bindSlider('bulge', 'bulgeStrength', { format: (v) => v.toFixed(2) });
 bindSlider('tubeRadius', 'tubeRadius', { format: (v) => v.toFixed(3) });
 bindSlider('twist', 'twistTurns', { format: (v) => v.toFixed(1) });
+bindSlider('ribbonDepth', 'ribbonDepthFraction', {
+  toParam: (v) => v / 100,
+  format: (v) => `${Math.round(v * 100)}%`,
+});
+bindSlider('hexCell', 'hexCellFraction', { format: (v) => v.toFixed(2) });
 
 document.getElementById('wave-enabled').addEventListener('change', (e) => {
   params.waveEnabled = e.target.checked;
@@ -256,6 +273,19 @@ document.getElementById('arm-labels').addEventListener('change', (e) => {
 });
 document.getElementById('membrane-mode').addEventListener('change', (e) => {
   params.showMembrane = e.target.checked;
+  if (params.showMembrane && params.showHexGrid) {
+    params.showHexGrid = false;
+    document.getElementById('hex-grid-mode').checked = false;
+  }
+  rebuildStars();
+  rebuildRibbons();
+});
+document.getElementById('hex-grid-mode').addEventListener('change', (e) => {
+  params.showHexGrid = e.target.checked;
+  if (params.showHexGrid && params.showMembrane) {
+    params.showMembrane = false;
+    document.getElementById('membrane-mode').checked = false;
+  }
   rebuildStars();
   rebuildRibbons();
 });
@@ -333,6 +363,9 @@ window.addEventListener('resize', () => {
 
 rebuildStars();
 rebuildRibbons();
+if (params.autoConnectAdjacent) {
+  autoConnectStatusEl.textContent = `${adjacentPairs.length} adjacency ribbons active (every arm touched twice)`;
+}
 
 function animate() {
   requestAnimationFrame(animate);

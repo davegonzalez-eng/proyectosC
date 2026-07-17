@@ -114,6 +114,15 @@
       <input id="twist" type="range" min="0" max="2" step="0.1" value="0.5" />
       <span class="val" id="twist-value"></span>
     </div>
+    <div class="row">
+      <label for="ribbonDepth">Ribbon depth</label>
+      <input id="ribbonDepth" type="range" min="50" max="100" step="1" value="90" />
+      <span class="val" id="ribbonDepth-value"></span>
+    </div>
+    <div class="hint" style="margin-top: -6px;">
+      Lowest point of a ribbon, as % of the face's own radius from the
+      sculpture's center (90% = just barely ducks under the surface).
+    </div>
     <div class="check-row">
       <input type="checkbox" id="face-labels" checked />
       <label for="face-labels">Show face labels (F0..F11)</label>
@@ -125,6 +134,15 @@
     <div class="check-row">
       <input type="checkbox" id="membrane-mode" />
       <label for="membrane-mode">Fill star interior (thin surface)</label>
+    </div>
+    <div class="check-row">
+      <input type="checkbox" id="hex-grid-mode" />
+      <label for="hex-grid-mode">Fill star interior (hex grid)</label>
+    </div>
+    <div class="row">
+      <label for="hexCell">Hex cell size</label>
+      <input id="hexCell" type="range" min="0.08" max="0.4" step="0.01" value="0.22" />
+      <span class="val" id="hexCell-value"></span>
     </div>
 
     <div class="row" style="margin-top: 12px;">
@@ -139,7 +157,7 @@
     <hr />
 
     <div class="check-row">
-      <input type="checkbox" id="auto-connect" />
+      <input type="checkbox" id="auto-connect" checked />
       <label for="auto-connect">Auto-connect adjacent faces</label>
     </div>
     <div class="hint" style="margin-top: -4px;">

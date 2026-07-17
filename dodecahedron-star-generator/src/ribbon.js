@@ -1,11 +1,15 @@
 // Builds a twisted, ribbon-like connector mesh between two star-arm tips.
 //
-// The curve is a cubic Bezier that leaves each tip along that tip's own
-// outward direction just long enough to read as a continuation of the star
-// arm, then dives inward toward the sphere's center so the bulk of the
-// ribbon passes *under* the surrounding stars, at a lower radius than the
-// surface geometry - a woven, over-under look rather than tendrils arcing
-// above the body.
+// The curve is a 5-point Catmull-Rom spline: tip -> short "leave" point
+// along that tip's own outward direction -> a dip point pulled inward
+// toward the sphere's center to a precise target radius -> a matching
+// "leave" point on the other side -> the other tip. Because Catmull-Rom
+// passes exactly through every one of those points (unlike Bezier control
+// points, which only pull the curve without touching it), the dip depth is
+// exact rather than approximate, and the tangent at each tip is pinned
+// close to that tip's own outward direction - the same direction the
+// star's own tube trends as it reaches the tip - so the ribbon reads as a
+// continuation of the arm instead of a rod stabbed into it.
 
 import * as THREE from 'three';
 
@@ -19,36 +23,39 @@ function smoothstep(edge0, edge1, x) {
  * @param {{position: THREE.Vector3, outDir: THREE.Vector3, label: string}} tipB
  * @param {object} [options]
  * @param {number} [options.segments=48]
- * @param {number} [options.halfWidth=0.09] ribbon half-width at its widest
+ * @param {number} [options.halfWidth=0.09] ribbon half-width at its widest (middle)
+ * @param {number} [options.tubeRadius=0.04] cross-section size to blend into at each end, matching the star tube's own radius so there's no visible jump at the join
  * @param {number} [options.twistTurns=0.5] number of full twists along the ribbon (kept low so the strip doesn't fight itself visually)
- * @param {number} [options.leavePull=0.18] how far the curve initially follows each tip's own outward direction, as a fraction of tip-to-tip distance
- * @param {number} [options.dipPull=0.85] how far the control points are then pulled inward toward the sphere center, as a fraction of tip-to-tip distance
- * @param {number} [options.minDip=0.3] floor on the inward pull (world units), so short hops still duck visibly under the surface
- * @returns {{geometry: THREE.BufferGeometry, curve: THREE.CubicBezierCurve3}}
+ * @param {number} [options.leaveFraction=0.22] how far (as a fraction of tip-to-tip distance) the curve travels along each tip's own outward direction before the dip - controls how "smoothly" it blends with the arm
+ * @param {number} [options.depthFraction=0.9] target radius at the dip point, as a fraction of the endpoints' average distance from the sphere center (e.g. 0.9 = dips only 10% of the way toward the center)
+ * @returns {{geometry: THREE.BufferGeometry, curve: THREE.CatmullRomCurve3}}
  */
 export function buildRibbon(tipA, tipB, options = {}) {
   const {
     segments = 48,
     halfWidth = 0.09,
+    tubeRadius = 0.04,
     twistTurns = 0.5,
-    leavePull = 0.18,
-    dipPull = 0.85,
-    minDip = 0.3,
+    leaveFraction = 0.22,
+    depthFraction = 0.9,
   } = options;
 
   const pA = tipA.position;
   const pB = tipB.position;
   const span = pA.distanceTo(pB);
-  const leaveLen = span * leavePull;
-  const dipLen = Math.max(span * dipPull, minDip);
+  const leaveLen = Math.max(span * leaveFraction, 0.02);
 
-  const radialA = pA.clone().normalize();
-  const radialB = pB.clone().normalize();
+  const leaveA = pA.clone().addScaledVector(tipA.outDir, leaveLen);
+  const leaveB = pB.clone().addScaledVector(tipB.outDir, leaveLen);
 
-  const c1 = pA.clone().addScaledVector(tipA.outDir, leaveLen).addScaledVector(radialA, -dipLen);
-  const c2 = pB.clone().addScaledVector(tipB.outDir, leaveLen).addScaledVector(radialB, -dipLen);
+  const avgRadius = (pA.length() + pB.length()) / 2;
+  const targetRadius = avgRadius * depthFraction;
+  const midPoint = leaveA.clone().add(leaveB).multiplyScalar(0.5);
+  const dipMid = midPoint.length() > 1e-6
+    ? midPoint.clone().setLength(Math.min(targetRadius, midPoint.length()))
+    : midPoint;
 
-  const curve = new THREE.CubicBezierCurve3(pA, c1, c2, pB);
+  const curve = new THREE.CatmullRomCurve3([pA, leaveA, dipMid, leaveB, pB], false, 'catmullrom', 0.5);
   const frames = curve.computeFrenetFrames(segments, false);
   const points = curve.getSpacedPoints(segments);
 
@@ -63,9 +70,14 @@ export function buildRibbon(tipA, tipB, options = {}) {
     const twistAngle = twistTurns * Math.PI * 2 * t;
     const ribbonDir = normal.clone().applyAxisAngle(tangent, twistAngle);
 
-    // Taper the ends down so the ribbon reads as growing out of the star
-    // tip rather than being capped flat.
-    const width = halfWidth * smoothstep(0, 0.12, t) * smoothstep(1, 0.88, t) || halfWidth * 0.001;
+    // Blend the cross-section from the tube's own radius at each end up to
+    // the full ribbon width in the middle, so the surface size matches the
+    // star tube's at the join instead of jumping from a point or a slab.
+    const width = THREE.MathUtils.lerp(
+      tubeRadius,
+      halfWidth,
+      smoothstep(0, 0.3, t) * smoothstep(1, 0.7, t)
+    );
 
     const edgeA = points[i].clone().addScaledVector(ribbonDir, width);
     const edgeB = points[i].clone().addScaledVector(ribbonDir, -width);
