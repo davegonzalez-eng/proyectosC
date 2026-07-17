@@ -1,33 +1,45 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from '../vendor/three/CSS2DRenderer.js';
-import { buildDodecahedron, buildStar } from './geometry.js';
+import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
+import { buildDodecahedron, buildStar, computeAdjacentFaceConnections } from './geometry.js';
 import { buildRibbon } from './ribbon.js';
+import { buildMembrane } from './membrane.js';
 
 // ---------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------
 
 const params = {
-  swirlDeg: 30,
-  k: 4,
+  swirlDeg: 25,
+  k: 5.4,
   waveEnabled: true,
   innerRatio: 0.382,
   tipScale: 0.96,
-  bulgeStrength: 0,
-  tubeRadius: 0.025,
-  twistTurns: 1,
+  bulgeStrength: 0.41,
+  armTwistDeg: 20,
+  tubeRadius: 0.04,
+  twistTurns: 0.5,
   ribbonHalfWidth: 0.09,
   showFaceLabels: true,
   showArmLabels: true,
+  showMembrane: false,
+  autoConnectAdjacent: false,
+};
+
+const MATERIAL_PRESETS = {
+  bronze: { label: 'Bronze', color: 0xd7b978, metalness: 0.75, roughness: 0.32 },
+  titanium: { label: 'Titanium', color: 0x9aa0a6, metalness: 0.9, roughness: 0.45 },
+  metallized: { label: 'Metallized (chrome)', color: 0xe8e9eb, metalness: 1.0, roughness: 0.08 },
 };
 
 const RADIUS = 2;
 const faces = buildDodecahedron(RADIUS);
+const adjacentPairs = computeAdjacentFaceConnections(faces); // static, geometry-only: 60 pairs, every arm touched twice
 
 /** @type {Map<string, {position: THREE.Vector3, outDir: THREE.Vector3, label: string}>} */
 let tipsByLabel = new Map();
-let connections = []; // [{a: 'F0-A2', b: 'F5-A1'}]
+let connections = []; // [{a: 'F0-A2', b: 'F5-A1'}] from the text box
 let pendingPick = null;
 
 // ---------------------------------------------------------------------
@@ -47,6 +59,12 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 container.appendChild(renderer.domElement);
 
+// A generated (no external HDRI needed) room environment so metallic
+// presets - especially the near-mirror "metallized" one - actually show
+// reflections instead of reading flat/black.
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+
 const labelRenderer = new CSS2DRenderer();
 labelRenderer.setSize(window.innerWidth, window.innerHeight);
 labelRenderer.domElement.style.position = 'absolute';
@@ -59,33 +77,34 @@ controls.enableDamping = true;
 controls.minDistance = 2.5;
 controls.maxDistance = 20;
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x33303a, 1.1));
-const key = new THREE.DirectionalLight(0xffffff, 1.4);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x33303a, 0.6));
+const key = new THREE.DirectionalLight(0xffffff, 1.1);
 key.position.set(5, 8, 6);
 scene.add(key);
-const fill = new THREE.DirectionalLight(0x88aaff, 0.5);
+const fill = new THREE.DirectionalLight(0x88aaff, 0.35);
 fill.position.set(-6, -3, -4);
 scene.add(fill);
 
-const starMaterial = new THREE.MeshStandardMaterial({
-  color: 0xd7b978,
-  metalness: 0.75,
-  roughness: 0.32,
-});
-const ribbonMaterial = new THREE.MeshStandardMaterial({
-  color: 0x9fd0e0,
-  metalness: 0.55,
-  roughness: 0.28,
-  side: THREE.DoubleSide,
-});
+// One shared material for the stars, ribbons and membranes so the whole
+// piece reads as a single cast/printed material rather than mixed parts.
+const sculptureMaterial = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
+function applyMaterialPreset(name) {
+  const preset = MATERIAL_PRESETS[name] || MATERIAL_PRESETS.bronze;
+  sculptureMaterial.color.setHex(preset.color);
+  sculptureMaterial.metalness = preset.metalness;
+  sculptureMaterial.roughness = preset.roughness;
+}
+applyMaterialPreset('bronze');
+
 const markerMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.2, roughness: 0.6 });
 const markerPickedMaterial = new THREE.MeshStandardMaterial({ color: 0xff5050, metalness: 0.2, roughness: 0.4 });
 
 const starsGroup = new THREE.Group();
+const membraneGroup = new THREE.Group();
 const labelsGroup = new THREE.Group();
 const markersGroup = new THREE.Group();
 const ribbonsGroup = new THREE.Group();
-scene.add(starsGroup, labelsGroup, markersGroup, ribbonsGroup);
+scene.add(starsGroup, membraneGroup, labelsGroup, markersGroup, ribbonsGroup);
 
 // ---------------------------------------------------------------------
 // Star (re)construction
@@ -100,6 +119,7 @@ function makeLabelDiv(text, className) {
 
 function rebuildStars() {
   starsGroup.clear();
+  membraneGroup.clear();
   labelsGroup.clear();
   markersGroup.clear();
   tipsByLabel = new Map();
@@ -109,7 +129,12 @@ function rebuildStars() {
 
     const curve = new THREE.CatmullRomCurve3(star.outline, true, 'catmullrom', 0.5);
     const tubeGeom = new THREE.TubeGeometry(curve, 200, params.tubeRadius, 8, true);
-    starsGroup.add(new THREE.Mesh(tubeGeom, starMaterial));
+    starsGroup.add(new THREE.Mesh(tubeGeom, sculptureMaterial));
+
+    if (params.showMembrane) {
+      const membraneGeom = buildMembrane(star);
+      membraneGroup.add(new THREE.Mesh(membraneGeom, sculptureMaterial));
+    }
 
     if (params.showFaceLabels) {
       const faceLabel = new CSS2DObject(makeLabelDiv(face.label, 'face-label'));
@@ -148,7 +173,19 @@ function refreshMarkerHighlight() {
 
 function rebuildRibbons() {
   ribbonsGroup.clear();
-  for (const { a, b } of connections) {
+
+  const pairs = [...connections];
+  if (params.autoConnectAdjacent) {
+    const seen = new Set(pairs.map(({ a, b }) => [a, b].sort().join('|')));
+    for (const p of adjacentPairs) {
+      const key = [p.a, p.b].sort().join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pairs.push(p);
+    }
+  }
+
+  for (const { a, b } of pairs) {
     const tipA = tipsByLabel.get(a);
     const tipB = tipsByLabel.get(b);
     if (!tipA || !tipB) continue;
@@ -156,7 +193,7 @@ function rebuildRibbons() {
       halfWidth: params.ribbonHalfWidth,
       twistTurns: params.twistTurns,
     });
-    ribbonsGroup.add(new THREE.Mesh(geometry, ribbonMaterial));
+    ribbonsGroup.add(new THREE.Mesh(geometry, sculptureMaterial));
   }
 }
 
@@ -198,6 +235,7 @@ function bindSlider(id, key, { toParam = (v) => v, format = (v) => v } = {}) {
 }
 
 bindSlider('swirl', 'swirlDeg', { format: (v) => `${v.toFixed(0)}°` });
+bindSlider('armTwist', 'armTwistDeg', { format: (v) => `${v.toFixed(0)}°` });
 bindSlider('k', 'k', { format: (v) => v.toFixed(1) });
 bindSlider('bulge', 'bulgeStrength', { format: (v) => v.toFixed(2) });
 bindSlider('tubeRadius', 'tubeRadius', { format: (v) => v.toFixed(3) });
@@ -216,6 +254,23 @@ document.getElementById('arm-labels').addEventListener('change', (e) => {
   params.showArmLabels = e.target.checked;
   rebuildStars();
 });
+document.getElementById('membrane-mode').addEventListener('change', (e) => {
+  params.showMembrane = e.target.checked;
+  rebuildStars();
+  rebuildRibbons();
+});
+document.getElementById('auto-connect').addEventListener('change', (e) => {
+  params.autoConnectAdjacent = e.target.checked;
+  rebuildRibbons();
+  autoConnectStatusEl.textContent = params.autoConnectAdjacent
+    ? `${adjacentPairs.length} adjacency ribbons active (every arm touched twice)`
+    : '';
+});
+document.getElementById('material-select').addEventListener('change', (e) => {
+  applyMaterialPreset(e.target.value);
+});
+
+const autoConnectStatusEl = document.getElementById('auto-connect-status');
 
 const connectionsInput = document.getElementById('connections-input');
 const statusEl = document.getElementById('connections-status');
@@ -277,6 +332,7 @@ window.addEventListener('resize', () => {
 });
 
 rebuildStars();
+rebuildRibbons();
 
 function animate() {
   requestAnimationFrame(animate);

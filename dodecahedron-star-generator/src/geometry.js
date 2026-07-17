@@ -104,29 +104,23 @@ export function buildDodecahedron(radius = 1) {
 }
 
 /**
- * Convert a local 2D (u, w) coordinate on a face's plane to world space,
- * with an optional bulge displacement along the face normal - the hook
- * for eventually curving the flat face into a domed/printed surface.
- */
-function toWorld(face, u, w, bulgeHeight) {
-  return face.center.clone()
-    .addScaledVector(face.U, u)
-    .addScaledVector(face.W, w)
-    .addScaledVector(face.normal, bulgeHeight || 0);
-}
-
-/**
  * Distort a single (angle, radius) polar sample with:
- *   - a counter-clockwise swirl whose strength grows with radius
+ *   - a counter-clockwise swirl (about the face normal) whose strength
+ *     grows with radius
  *   - a radial "wave" ripple: r' = r + (r/k) * sin(k * r)
  *   - an optional dome bulge along the face normal
+ *   - a second, independent "blade" twist about the arm's own outward axis
+ *     (face center -> that arm's undistorted tip), which banks the point
+ *     out of the face plane the further out it sits - like a propeller
+ *     blade twisting along its own length, layered on top of the in-plane
+ *     swirl rather than replacing it
  *
  * r2 (the "distance to star center") is always the *undistorted* radius,
  * matching the spec: the wave and swirl amounts are both functions of the
  * original r2, not of each other.
  */
-function distortPoint(face, angle, r2, params) {
-  const { swirlRad, k, waveEnabled, bulgeStrength } = params;
+function distortPoint(face, angle, r2, armAxis, params) {
+  const { swirlRad, k, waveEnabled, bulgeStrength, armTwistRad } = params;
 
   const swirlTheta = angle + swirlRad * (r2 / face.R_out);
 
@@ -142,7 +136,16 @@ function distortPoint(face, angle, r2, params) {
     ? bulgeStrength * (1 - Math.pow(r2 / face.R_out, 2))
     : 0;
 
-  return toWorld(face, u, w, bulge);
+  const offset = face.U.clone()
+    .multiplyScalar(u)
+    .addScaledVector(face.W, w)
+    .addScaledVector(face.normal, bulge);
+
+  if (armTwistRad && armAxis) {
+    offset.applyAxisAngle(armAxis, armTwistRad * (r2 / face.R_out));
+  }
+
+  return { world: face.center.clone().add(offset), u, w };
 }
 
 /**
@@ -156,40 +159,108 @@ function distortPoint(face, angle, r2, params) {
  * @param {number} params.innerRatio inner-vertex radius as a fraction of R_out (classic pentagram ~ 1/phi^2 = 0.382)
  * @param {number} params.tipScale   outer-vertex radius as a fraction of R_out (<=1, gives breathing room from the face edge)
  * @param {number} params.bulgeStrength dome height at the face center (0 = flat)
+ * @param {number} params.armTwistDeg  second "blade" swirl (deg) about each arm's own outward axis, applied at r = R_out
  * @returns {StarResult}
  */
 export function buildStar(face, params) {
   const swirlRad = THREE.MathUtils.degToRad(params.swirlDeg || 0);
-  const p = { ...params, swirlRad };
+  const armTwistRad = THREE.MathUtils.degToRad(params.armTwistDeg || 0);
+  const p = { ...params, swirlRad, armTwistRad };
 
   const baseAngle = (i) => {
     const v = face.vertices3D[i].clone().sub(face.center);
     return Math.atan2(v.dot(face.W), v.dot(face.U));
   };
+  const armAxis = (i) => face.vertices3D[i].clone().sub(face.center).normalize();
 
   const tipR = face.R_out * (params.tipScale ?? 1);
   const innerR = face.R_out * (params.innerRatio ?? 0.382);
 
   const tips = [];
   const outline = [];
+  const outline2D = [];
   for (let i = 0; i < ARMS_PER_FACE; i++) {
     const tipAngle = baseAngle(i);
-    const tipPos = distortPoint(face, tipAngle, tipR, p);
+    const axis = armAxis(i); // both this arm's tip and its trailing inner point twist about the same blade axis
+    const tip = distortPoint(face, tipAngle, tipR, axis, p);
     tips.push({
       label: `F${face.index}-A${i}`,
       faceIndex: face.index,
       armIndex: i,
-      position: tipPos,
-      outDir: tipPos.clone().sub(face.center).normalize(),
+      position: tip.world,
+      outDir: tip.world.clone().sub(face.center).normalize(),
     });
 
     const innerAngle = tipAngle + Math.PI / ARMS_PER_FACE; // halfway to next tip
-    const innerPos = distortPoint(face, innerAngle, innerR, p);
+    const inner = distortPoint(face, innerAngle, innerR, axis, p);
 
-    outline.push(tipPos, innerPos);
+    outline.push(tip.world, inner.world);
+    outline2D.push({ u: tip.u, w: tip.w }, { u: inner.u, w: inner.w });
   }
 
-  return { faceIndex: face.index, tips, outline };
+  return { faceIndex: face.index, tips, outline, outline2D };
 }
 
 export const ARMS = ARMS_PER_FACE;
+
+const vertexKey = (v) => `${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`;
+
+/**
+ * Group star arms by the (undistorted) dodecahedron vertex they sit at.
+ * Every vertex of a regular dodecahedron is shared by exactly 3 faces, so
+ * this returns 20 groups of 3 {faceIndex, armIndex} entries.
+ */
+export function groupArmsByVertex(faces) {
+  const groups = new Map();
+  for (const face of faces) {
+    face.vertices3D.forEach((v, armIndex) => {
+      const k = vertexKey(v);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push({ faceIndex: face.index, armIndex });
+    });
+  }
+  return [...groups.values()];
+}
+
+/**
+ * The "adjacent faces landing on the star" connection rule, reverse-engineered
+ * from a reference set of 5 connections onto face 7:
+ *
+ *   F6-A0:F7-A2, F10-A1:F7-A3, F7-A4:F0-A3, F7-A0:F1-A3, F8-A0:F7-A1
+ *
+ * For a face F and arm index m, take the edge of F between its vertices
+ * (m+1) and (m+2) (mod 5). That edge is shared with exactly one neighbor
+ * face G. Connect F's arm m to G's arm at the (m+2) vertex (the far end of
+ * that edge, i.e. G's own arm that sits at the same physical corner).
+ *
+ * Applied uniformly across all 12 faces x 5 arms this yields exactly 60
+ * unique ribbons with every arm touched by exactly two of them (once as the
+ * "m" arm of its own face, once as the landing arm from a neighbor) -
+ * verified to reproduce the reference set exactly when F = face 7.
+ */
+export function computeAdjacentFaceConnections(faces) {
+  const groups = groupArmsByVertex(faces);
+  const byVertexKey = new Map();
+  faces.forEach((face) => {
+    face.vertices3D.forEach((v, armIndex) => {
+      byVertexKey.set(`${face.index}:${armIndex}`, vertexKey(v));
+    });
+  });
+  // vertexKey -> [{faceIndex, armIndex}, ...]
+  const atVertex = new Map();
+  groups.forEach((g) => atVertex.set(vertexKey(faces[g[0].faceIndex].vertices3D[g[0].armIndex]), g));
+
+  const pairs = [];
+  for (const face of faces) {
+    for (let m = 0; m < ARMS_PER_FACE; m++) {
+      const startVKey = byVertexKey.get(`${face.index}:${(m + 1) % ARMS_PER_FACE}`);
+      const endVKey = byVertexKey.get(`${face.index}:${(m + 2) % ARMS_PER_FACE}`);
+      const facesAtStart = atVertex.get(startVKey).map((e) => e.faceIndex);
+      const entriesAtEnd = atVertex.get(endVKey).filter((e) => e.faceIndex !== face.index);
+      const landing = entriesAtEnd.find((e) => facesAtStart.includes(e.faceIndex));
+      if (!landing) continue; // shouldn't happen on a closed dodecahedron
+      pairs.push({ a: `F${face.index}-A${m}`, b: `F${landing.faceIndex}-A${landing.armIndex}` });
+    }
+  }
+  return pairs;
+}

@@ -1,9 +1,11 @@
 // Builds a twisted, ribbon-like connector mesh between two star-arm tips.
 //
 // The curve is a cubic Bezier that leaves each tip along that tip's own
-// outward direction (so it reads as a continuation of the star arm rather
-// than a straight rod stabbed into it), bulging away from the sculpture's
-// body the way the cast tendrils in Bathsheba Grossman's "Quin" do.
+// outward direction just long enough to read as a continuation of the star
+// arm, then dives inward toward the sphere's center so the bulk of the
+// ribbon passes *under* the surrounding stars, at a lower radius than the
+// surface geometry - a woven, over-under look rather than tendrils arcing
+// above the body.
 
 import * as THREE from 'three';
 
@@ -18,25 +20,33 @@ function smoothstep(edge0, edge1, x) {
  * @param {object} [options]
  * @param {number} [options.segments=48]
  * @param {number} [options.halfWidth=0.09] ribbon half-width at its widest
- * @param {number} [options.twistTurns=1] number of full twists along the ribbon
- * @param {number} [options.controlPull=0.55] how far the bezier control points are pulled outward, as a fraction of tip-to-tip distance
+ * @param {number} [options.twistTurns=0.5] number of full twists along the ribbon (kept low so the strip doesn't fight itself visually)
+ * @param {number} [options.leavePull=0.18] how far the curve initially follows each tip's own outward direction, as a fraction of tip-to-tip distance
+ * @param {number} [options.dipPull=0.85] how far the control points are then pulled inward toward the sphere center, as a fraction of tip-to-tip distance
+ * @param {number} [options.minDip=0.3] floor on the inward pull (world units), so short hops still duck visibly under the surface
  * @returns {{geometry: THREE.BufferGeometry, curve: THREE.CubicBezierCurve3}}
  */
 export function buildRibbon(tipA, tipB, options = {}) {
   const {
     segments = 48,
     halfWidth = 0.09,
-    twistTurns = 1,
-    controlPull = 0.55,
+    twistTurns = 0.5,
+    leavePull = 0.18,
+    dipPull = 0.85,
+    minDip = 0.3,
   } = options;
 
   const pA = tipA.position;
   const pB = tipB.position;
   const span = pA.distanceTo(pB);
-  const ctrlLen = Math.max(span * controlPull, 0.05);
+  const leaveLen = span * leavePull;
+  const dipLen = Math.max(span * dipPull, minDip);
 
-  const c1 = pA.clone().addScaledVector(tipA.outDir, ctrlLen);
-  const c2 = pB.clone().addScaledVector(tipB.outDir, ctrlLen);
+  const radialA = pA.clone().normalize();
+  const radialB = pB.clone().normalize();
+
+  const c1 = pA.clone().addScaledVector(tipA.outDir, leaveLen).addScaledVector(radialA, -dipLen);
+  const c2 = pB.clone().addScaledVector(tipB.outDir, leaveLen).addScaledVector(radialB, -dipLen);
 
   const curve = new THREE.CubicBezierCurve3(pA, c1, c2, pB);
   const frames = curve.computeFrenetFrames(segments, false);
