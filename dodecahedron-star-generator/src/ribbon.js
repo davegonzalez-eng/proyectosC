@@ -1,15 +1,16 @@
 // Builds a twisted, ribbon-like connector mesh between two star-arm tips.
 //
 // The curve is a 5-point Catmull-Rom spline: tip -> short "leave" point
-// along that tip's own outward direction -> a dip point pulled inward
-// toward the sphere's center to a precise target radius -> a matching
-// "leave" point on the other side -> the other tip. Because Catmull-Rom
-// passes exactly through every one of those points (unlike Bezier control
-// points, which only pull the curve without touching it), the dip depth is
-// exact rather than approximate, and the tangent at each tip is pinned
-// close to that tip's own outward direction - the same direction the
-// star's own tube trends as it reaches the tip - so the ribbon reads as a
-// continuation of the arm instead of a rod stabbed into it.
+// along that tip's own *tangent* (its arm's actual trend as it reaches the
+// tip - already curving thanks to swirl/wave/bulge/arm-twist, generally
+// dipping toward a lower radius rather than heading straight out) -> a dip
+// point pulled inward toward the sphere's center to a precise target
+// radius -> a matching "leave" point on the other side -> the other tip.
+// Because Catmull-Rom passes exactly through every one of those points
+// (unlike Bezier control points, which only pull the curve without
+// touching it), the dip depth is exact rather than approximate, and the
+// ribbon continues the arm's own existing slope instead of resetting to a
+// purely radial direction and only then diving inward.
 
 import * as THREE from 'three';
 
@@ -19,14 +20,14 @@ function smoothstep(edge0, edge1, x) {
 }
 
 /**
- * @param {{position: THREE.Vector3, outDir: THREE.Vector3, label: string}} tipA
- * @param {{position: THREE.Vector3, outDir: THREE.Vector3, label: string}} tipB
+ * @param {{position: THREE.Vector3, outDir: THREE.Vector3, tangent: THREE.Vector3, label: string}} tipA
+ * @param {{position: THREE.Vector3, outDir: THREE.Vector3, tangent: THREE.Vector3, label: string}} tipB
  * @param {object} [options]
  * @param {number} [options.segments=48]
  * @param {number} [options.halfWidth=0.09] ribbon half-width at its widest (middle)
  * @param {number} [options.tubeRadius=0.04] cross-section size to blend into at each end, matching the star tube's own radius so there's no visible jump at the join
  * @param {number} [options.twistTurns=0.5] number of full twists along the ribbon (kept low so the strip doesn't fight itself visually)
- * @param {number} [options.leaveFraction=0.22] how far (as a fraction of tip-to-tip distance) the curve travels along each tip's own outward direction before the dip - controls how "smoothly" it blends with the arm
+ * @param {number} [options.leaveFraction=0.22] how far (as a fraction of tip-to-tip distance) the curve travels along each tip's own tangent before the dip - controls how "smoothly" it blends with the arm
  * @param {number} [options.depthFraction=0.9] target radius at the dip point, as a fraction of the endpoints' average distance from the sphere center (e.g. 0.9 = dips only 10% of the way toward the center)
  * @returns {{geometry: THREE.BufferGeometry, curve: THREE.CatmullRomCurve3}}
  */
@@ -45,8 +46,8 @@ export function buildRibbon(tipA, tipB, options = {}) {
   const span = pA.distanceTo(pB);
   const leaveLen = Math.max(span * leaveFraction, 0.02);
 
-  const leaveA = pA.clone().addScaledVector(tipA.outDir, leaveLen);
-  const leaveB = pB.clone().addScaledVector(tipB.outDir, leaveLen);
+  const leaveA = pA.clone().addScaledVector(tipA.tangent || tipA.outDir, leaveLen);
+  const leaveB = pB.clone().addScaledVector(tipB.tangent || tipB.outDir, leaveLen);
 
   const avgRadius = (pA.length() + pB.length()) / 2;
   const targetRadius = avgRadius * depthFraction;

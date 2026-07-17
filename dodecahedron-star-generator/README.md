@@ -62,7 +62,7 @@ grows with radius:
 
 So the star's center stays put while its outline twists more the further out
 you go — a simple, controllable "pinwheel" distortion. Exposed as the **Swirl**
-slider (0–90°, default 25°).
+slider (0–90°, default 23°).
 
 ### 4b. Arm-axis twist (blade twist)
 
@@ -80,7 +80,8 @@ Since that axis lies *in* the face plane rather than along the face normal,
 rotating around it banks each arm out of the plane as it extends from center
 to tip — like a propeller blade twisting along its own length, five
 independent blades per star. Exposed as the **Arm-axis twist** slider
-(0–90°, default 20°).
+(0–90°, default **0°** — off by default; dial it in for a more organic,
+less symmetric look).
 
 ### 5. Waving (radial distortion)
 
@@ -93,7 +94,7 @@ r' = r2 + (r2 / k) · sin(k · r2)
 where `r2` is the point's *original*, undistorted distance to the star's
 center in the face plane (per the spec — swirl and wave are both independent
 functions of `r2`, not of each other's output). `k` controls both the ripple
-frequency and (inversely) its amplitude; default `k = 5.4`. Exposed as the
+frequency and (inversely) its amplitude; default `k = 5`. Exposed as the
 **Wave k** slider, with a checkbox to disable the wave entirely and see the
 plain swirled star.
 
@@ -108,7 +109,7 @@ bulge = bulgeStrength · (1 − (r2 / R_out)²)
 ```
 
 i.e. maximal at the star's center, zero at the pentagon's rim (so neighboring
-faces still meet cleanly at shared edges). Default `bulgeStrength = 0.41`.
+faces still meet cleanly at shared edges). Default `bulgeStrength = 0.5`.
 A true printable/cast curved-surface export is out of scope for this pass.
 
 ### 7. Ribbon connectors
@@ -119,20 +120,24 @@ leave point → tip`. Catmull-Rom passes exactly through every one of those
 points (unlike Bézier control points, which only pull the curve without
 touching it), which buys two precise guarantees:
 
-- **Tangent match at the join.** Each "leave" point sits a short distance
-  along that tip's *own* outward direction, so the curve's tangent right at
-  the tip is pinned to within a fraction of a degree of `outDir` — the same
-  direction the star's own tube trends as it reaches that tip — instead of
-  bending off at an angle. (Verified numerically: worst-case misalignment
-  across all 60 auto-connect ribbons is 0.3°.)
+- **Continues the arm's own trend, not a reset direction.** Each "leave"
+  point sits a short distance along that tip's *actual tangent*
+  (`buildStar()` samples the arm's own curve a hair before the tip via
+  finite difference, so it captures however swirl/wave/bulge/arm-twist are
+  already bending it) rather than the tip's purely-radial `outDir`. Since
+  the bulge is falling back to the flat rim right as `r` approaches
+  `R_out`, the arm is typically already trending toward a lower radius
+  right before the tip — the ribbon picks up exactly that trend instead of
+  first shooting outward along `outDir` and only then diving inward.
+  (Verified numerically: tangent misalignment at the join is under 0.4°
+  across all 20 ribbons, versus a visible kink before this change.)
 - **Exact dip depth.** The middle "dip" point is placed at a precise target
   radius from the sculpture's center: `depthFraction × avgRadius`, where
   `avgRadius` is the average of the two tips' own distance from center.
-  Default `depthFraction = 0.9` — the ribbon's lowest point sits at 90% of
-  the face's radius, i.e. only dips 10% of the way toward the center, just
-  barely ducking under the surface rather than diving deep into the body.
-  (Verified numerically: min/max/avg depth ratio across all 60 ribbons is
-  exactly 0.900.) Tunable via the **Ribbon depth** slider (50–100%).
+  Default `depthFraction = 0.8` — the ribbon's lowest point sits at 80% of
+  the face's radius. (Verified numerically: min/max depth ratio across all
+  20 ribbons is exactly 0.800.) Tunable via the **Ribbon depth** slider
+  (50–100%).
 
 The cross-section also blends smoothly: its half-width starts at
 `tubeRadius` (matching the star tube's own thickness) right at each tip and
@@ -141,7 +146,7 @@ apparent thickness at the join — no more thin thread poking out of a fat
 tube. A twisted flat strip is then built along the curve using Frenet frames
 plus a continuously increasing twist angle (**Ribbon twist** slider, in full
 turns; default **0.5**, a single half-turn — kept low so the strip doesn't
-fight itself visually across 60 simultaneous ribbons).
+fight itself visually across many simultaneous ribbons).
 
 ### 8. Specifying connections
 
@@ -160,9 +165,9 @@ typing, **click any two arm markers in the 3D view** — the first click is
 highlighted red and the second one appends `A:B` to the text box and redraws
 automatically.
 
-### 9. Auto-connect adjacent faces
+### 9. Adjacent-face connections (always on)
 
-The **Auto-connect adjacent faces** checkbox generates a full set of
+`src/geometry.js:computeAdjacentFaceConnections()` generates the sculpture's
 "neighbor" ribbons from a single combinatorial rule, reverse-engineered from
 a reference set of 5 connections onto face 7:
 
@@ -170,15 +175,34 @@ a reference set of 5 connections onto face 7:
 F6-A0:F7-A2, F10-A1:F7-A3, F7-A4:F0-A3, F7-A0:F1-A3, F8-A0:F7-A1
 ```
 
-For face `F` and arm `m`, take the edge of `F` between its vertices `(m+1)`
-and `(m+2)` (mod 5). That edge is shared with exactly one neighbor face `G`.
-Connect `F`'s arm `m` to `G`'s arm at that shared `(m+2)` vertex
-(`computeAdjacentFaceConnections()` in `src/geometry.js`). Applied to all 12
-faces × 5 arms this produces **60 unique ribbons**, with every one of the 60
-arms touched by exactly two of them — verified to reproduce the reference
-set exactly when `F = 7`. Manual connections from the text box are kept and
-merged (de-duplicated) with the auto-generated set. **On by default** so the
-full lattice is there the moment the page loads.
+**The rule.** For face `F` and arm `m`, take the edge of `F` between its
+vertices `(m+1)` and `(m+2)` (mod 5). That edge is shared with exactly one
+neighbor face `G`. `F`'s arm `m` connects to `G`'s arm at that shared
+`(m+2)` vertex.
+
+**Why it can't just be applied to all 60 arms.** Doing that (every face,
+every arm, unconditionally) is the tool's earlier behavior, and it always
+decomposes into **20 disjoint triangles of 3 arms each** — a structural fact
+of this specific rule, verified by tracing its cycles, not a bug. A triangle
+graph can have at most one matched edge (any edge uses 2 of its 3 vertices,
+and the third can't be added without reusing one), so getting "each arm
+connected once" is only possible by keeping *one* edge per triangle and
+accepting that the third arm in each triangle gets no ribbon.
+
+**Which edge to keep.** All 5 of the given face-7 pairs turn out to be
+exactly face 7's own 5 rule outputs — i.e. in every triangle that includes
+face 7, face 7's edge is the one that's kept. To reproduce that generally,
+face 7 is processed *first*: its 5 edges are claimed unconditionally before
+any other face gets a turn. The remaining 11 faces are then processed in
+ascending order, each claiming its own rule output for a given arm only if
+neither endpoint has already been claimed by an earlier face.
+
+**Result:** exactly **20 ribbons**, covering 40 of the 60 arms; every
+connected arm is touched exactly once (verified numerically). The other 20
+arms (one per triangle) have no auto-generated connection — you can still
+wire any of them up manually below. This is always on; there's no toggle
+for it. Manual connections from the text box are merged in
+(de-duplicated) on top of this fixed set.
 
 ### 10. Filling the star interior: solid membrane or hex grid
 
@@ -233,20 +257,25 @@ vendor/three/           vendored Three.js build + OrbitControls + CSS2DRenderer 
 - Geometry math checked standalone under Node (`buildDodecahedron`/`buildStar`):
   12 equal-circumradius pentagon faces, exact 72° corner spacing, 20 vertices
   each shared by exactly 3 faces.
-- `computeAdjacentFaceConnections()` checked standalone under Node: exactly
-  reproduces the 5-pair face-7 reference set, and generalizes to 60 unique
-  pairs with every arm at degree 2.
-- `buildRibbon()` checked standalone under Node across all 60 auto-connect
-  pairs: depth ratio (min radius along the curve ÷ average endpoint radius)
-  is exactly 0.900 in every case (min/max/avg all 0.900), and worst-case
-  tangent misalignment at a tip is 0.3°.
+- `computeAdjacentFaceConnections()` checked standalone under Node in stages:
+  (1) the raw per-arm rule applied to all 60 arms decomposes into exactly 20
+  cycles of length 3 (verified by tracing); (2) the face-7-first greedy
+  reduction yields exactly 20 pairs, all 5 reference pairs present, and
+  every connected arm at degree exactly 1 (min = max = 1 across all 40
+  connected arms).
+- `buildRibbon()` checked standalone under Node across all 20 connection
+  pairs with the new defaults: depth ratio (min radius along the curve ÷
+  average endpoint radius) is exactly 0.800 in every case, and worst-case
+  tangent misalignment between the curve's initial tangent and the tip's
+  own arm-tangent is 0.36°.
 - Star outline triangulation (`buildMembrane`) and hex-grid clipping
   (`buildHexGrid`) checked standalone: expected triangle counts, no NaNs.
 - Full app checked in headless Chromium: renders with zero console errors;
   every slider (swirl/arm-twist/k/bulge/tube radius/twist/ribbon depth/hex
-  cell size) and toggle (membrane, hex grid, auto-connect, material)
-  visibly does what it says, including mutual exclusion between the two
-  fill modes and chrome/titanium reflections from the generated environment.
+  cell size) and toggle (membrane, hex grid, material) visibly does what it
+  says, including mutual exclusion between the two fill modes and
+  chrome/titanium reflections from the generated environment; the
+  adjacent-face connections render unconditionally with no checkbox.
 
 ## Possible next steps
 

@@ -12,23 +12,22 @@ import { buildHexGrid } from './hexgrid.js';
 // ---------------------------------------------------------------------
 
 const params = {
-  swirlDeg: 25,
-  k: 5.4,
+  swirlDeg: 23,
+  k: 5,
   waveEnabled: true,
   innerRatio: 0.382,
   tipScale: 0.96,
-  bulgeStrength: 0.41,
-  armTwistDeg: 20,
-  tubeRadius: 0.04,
+  bulgeStrength: 0.5,
+  armTwistDeg: 0,
+  tubeRadius: 0.03,
   twistTurns: 0.5,
   ribbonHalfWidth: 0.09,
-  ribbonDepthFraction: 0.9,
+  ribbonDepthFraction: 0.8,
   showFaceLabels: true,
   showArmLabels: true,
   showMembrane: false,
   showHexGrid: false,
-  hexCellFraction: 0.22,
-  autoConnectAdjacent: true,
+  hexCellFraction: 0.04,
 };
 
 const MATERIAL_PRESETS = {
@@ -39,7 +38,9 @@ const MATERIAL_PRESETS = {
 
 const RADIUS = 2;
 const faces = buildDodecahedron(RADIUS);
-const adjacentPairs = computeAdjacentFaceConnections(faces); // static, geometry-only: 60 pairs, every arm touched twice
+// Static, geometry-only, always-on: the F7-reference rule generalized to a
+// strict matching - 20 ribbons, every connected arm touched exactly once.
+const adjacentPairs = computeAdjacentFaceConnections(faces);
 
 /** @type {Map<string, {position: THREE.Vector3, outDir: THREE.Vector3, label: string}>} */
 let tipsByLabel = new Map();
@@ -184,15 +185,15 @@ function refreshMarkerHighlight() {
 function rebuildRibbons() {
   ribbonsGroup.clear();
 
-  const pairs = [...connections];
-  if (params.autoConnectAdjacent) {
-    const seen = new Set(pairs.map(({ a, b }) => [a, b].sort().join('|')));
-    for (const p of adjacentPairs) {
-      const key = [p.a, p.b].sort().join('|');
-      if (seen.has(key)) continue;
-      seen.add(key);
-      pairs.push(p);
-    }
+  // The F7-pattern adjacency ribbons are always on; manual connections from
+  // the text box are additional, de-duplicated against them.
+  const pairs = [...adjacentPairs];
+  const seen = new Set(pairs.map(({ a, b }) => [a, b].sort().join('|')));
+  for (const p of connections) {
+    const key = [p.a, p.b].sort().join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push(p);
   }
 
   for (const { a, b } of pairs) {
@@ -289,18 +290,14 @@ document.getElementById('hex-grid-mode').addEventListener('change', (e) => {
   rebuildStars();
   rebuildRibbons();
 });
-document.getElementById('auto-connect').addEventListener('change', (e) => {
-  params.autoConnectAdjacent = e.target.checked;
-  rebuildRibbons();
-  autoConnectStatusEl.textContent = params.autoConnectAdjacent
-    ? `${adjacentPairs.length} adjacency ribbons active (every arm touched twice)`
-    : '';
-});
 document.getElementById('material-select').addEventListener('change', (e) => {
   applyMaterialPreset(e.target.value);
 });
 
 const autoConnectStatusEl = document.getElementById('auto-connect-status');
+autoConnectStatusEl.textContent = `${adjacentPairs.length} adjacency ribbons active (each connected arm touched once; ${
+  faces.length * 5 - adjacentPairs.length * 2
+} arms have no auto-connection - see README)`;
 
 const connectionsInput = document.getElementById('connections-input');
 const statusEl = document.getElementById('connections-status');
@@ -363,9 +360,6 @@ window.addEventListener('resize', () => {
 
 rebuildStars();
 rebuildRibbons();
-if (params.autoConnectAdjacent) {
-  autoConnectStatusEl.textContent = `${adjacentPairs.length} adjacency ribbons active (every arm touched twice)`;
-}
 
 function animate() {
   requestAnimationFrame(animate);
