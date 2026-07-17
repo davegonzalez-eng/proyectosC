@@ -44,8 +44,31 @@
       backdrop-filter: blur(6px);
       font-size: 13px;
     }
+    #panel.collapsed { max-height: none; overflow: visible; padding-bottom: 16px; }
+    #panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
     #panel h1 { font-size: 15px; margin: 0 0 4px; }
     #panel p.sub { margin: 0 0 14px; color: #9aa0ac; line-height: 1.4; }
+    #panel-toggle {
+      flex: 0 0 auto;
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      color: #c7cad1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      line-height: 1;
+      transition: transform 0.15s ease;
+    }
+    #panel-toggle:hover { background: #2a3a4d; }
+    #panel.collapsed #panel-toggle { transform: rotate(-90deg); }
+    #panel.collapsed #panel-body { display: none; }
+    #panel.collapsed p.sub { display: none; }
     .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
     .row label { flex: 0 0 auto; color: #c7cad1; }
     .row input[type="range"] { flex: 1 1 auto; margin: 0 8px; }
@@ -77,12 +100,18 @@
   <div id="scene-container"></div>
 
   <div id="panel">
-    <h1>Dodecahedron Star Generator</h1>
-    <p class="sub">A Quin-style study: swirled &amp; waving stars on each pentagonal face, connected by ribbons.</p>
+    <div id="panel-header">
+      <div>
+        <h1>Dodecahedron Star Generator</h1>
+        <p class="sub">A Quin-style study: swirled &amp; waving stars on each pentagonal face, connected by ribbons.</p>
+      </div>
+      <button id="panel-toggle" title="Collapse/expand" aria-label="Collapse/expand controls">▾</button>
+    </div>
 
+    <div id="panel-body">
     <div class="row">
       <label for="swirl">Swirl</label>
-      <input id="swirl" type="range" min="0" max="90" step="1" value="23" />
+      <input id="swirl" type="range" min="0" max="90" step="1" value="3" />
       <span class="val" id="swirl-value"></span>
     </div>
     <div class="row">
@@ -92,12 +121,12 @@
     </div>
     <div class="row">
       <label for="armReach">Arm reach</label>
-      <input id="armReach" type="range" min="0.8" max="1.6" step="0.01" value="1.25" />
+      <input id="armReach" type="range" min="0.8" max="1.6" step="0.01" value="0.8" />
       <span class="val" id="armReach-value"></span>
     </div>
     <div class="row">
       <label for="curl">Tip curl</label>
-      <input id="curl" type="range" min="0" max="60" step="1" value="20" />
+      <input id="curl" type="range" min="0" max="60" step="1" value="24" />
       <span class="val" id="curl-value"></span>
     </div>
     <div class="hint" style="margin-top: -6px;">
@@ -109,7 +138,7 @@
     </div>
     <div class="row">
       <label for="k">Wave k</label>
-      <input id="k" type="range" min="0.5" max="14" step="0.1" value="5" />
+      <input id="k" type="range" min="0.5" max="14" step="0.1" value="2.7" />
       <span class="val" id="k-value"></span>
     </div>
     <div class="check-row">
@@ -118,12 +147,12 @@
     </div>
     <div class="row">
       <label for="bulge">Bulge</label>
-      <input id="bulge" type="range" min="0" max="0.6" step="0.01" value="0.5" />
+      <input id="bulge" type="range" min="0" max="0.6" step="0.01" value="0.2" />
       <span class="val" id="bulge-value"></span>
     </div>
     <div class="row">
       <label for="tipDip">Tip dip</label>
-      <input id="tipDip" type="range" min="0" max="0.6" step="0.01" value="0.2" />
+      <input id="tipDip" type="range" min="0" max="0.6" step="0.01" value="0.36" />
       <span class="val" id="tipDip-value"></span>
     </div>
     <div class="hint" style="margin-top: -6px;">
@@ -143,7 +172,7 @@
     </div>
     <div class="row">
       <label for="ribbonDepth">Ribbon depth</label>
-      <input id="ribbonDepth" type="range" min="50" max="100" step="1" value="80" />
+      <input id="ribbonDepth" type="range" min="50" max="100" step="1" value="81" />
       <span class="val" id="ribbonDepth-value"></span>
     </div>
     <div class="hint" style="margin-top: -6px;">
@@ -151,11 +180,11 @@
       sculpture's center (80% = ducks a bit under the surface).
     </div>
     <div class="check-row">
-      <input type="checkbox" id="face-labels" checked />
+      <input type="checkbox" id="face-labels" />
       <label for="face-labels">Show face labels (F0..F11)</label>
     </div>
     <div class="check-row">
-      <input type="checkbox" id="arm-labels" checked />
+      <input type="checkbox" id="arm-labels" />
       <label for="arm-labels">Show arm labels (F#-A0..A4)</label>
     </div>
     <div class="check-row">
@@ -163,7 +192,7 @@
       <label for="membrane-mode">Fill star interior (thin surface)</label>
     </div>
     <div class="check-row">
-      <input type="checkbox" id="hex-grid-mode" />
+      <input type="checkbox" id="hex-grid-mode" checked />
       <label for="hex-grid-mode">Fill star interior (hex grid)</label>
     </div>
     <div class="row">
@@ -203,6 +232,7 @@
       <button id="clear-btn">Clear</button>
     </div>
     <div id="connections-status"></div>
+    </div>
   </div>
 
   <script type="importmap">

@@ -6,29 +6,31 @@ import { buildDodecahedron, buildStar, computeAdjacentFaceConnections } from './
 import { buildRibbon } from './ribbon.js';
 import { buildMembrane } from './membrane.js';
 import { buildHexGrid } from './hexgrid.js';
+import { createHexTexture } from './hextexture.js';
+import { buildStarTube } from './startube.js';
 
 // ---------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------
 
 const params = {
-  swirlDeg: 23,
-  k: 5,
+  swirlDeg: 3,
+  k: 2.7,
   waveEnabled: true,
   innerRatio: 0.382,
-  tipScale: 1.25,
-  bulgeStrength: 0.5,
+  tipScale: 0.8,
+  bulgeStrength: 0.2,
   armTwistDeg: 0,
-  curlDeg: 20,
-  tipDipStrength: 0.2,
+  curlDeg: 24,
+  tipDipStrength: 0.36,
   tubeRadius: 0.03,
   twistTurns: 0.5,
   ribbonHalfWidth: 0.09,
-  ribbonDepthFraction: 0.8,
-  showFaceLabels: true,
-  showArmLabels: true,
+  ribbonDepthFraction: 0.81,
+  showFaceLabels: false,
+  showArmLabels: false,
   showMembrane: false,
-  showHexGrid: false,
+  showHexGrid: true,
   hexCellFraction: 0.02,
 };
 
@@ -93,14 +95,28 @@ const fill = new THREE.DirectionalLight(0x88aaff, 0.35);
 fill.position.set(-6, -3, -4);
 scene.add(fill);
 
-// One shared material for the stars, ribbons and membranes so the whole
-// piece reads as a single cast/printed material rather than mixed parts.
+// One shared material for the stars and membranes so the whole piece reads
+// as a single cast/printed material rather than mixed parts. Ribbons share
+// the same color/metalness/roughness but get their own material instance so
+// they can additionally carry the hex-grid bump texture - the same pattern
+// the star's own hex-grid fill uses, so a ribbon reads as "the same
+// material, textured" rather than a plain strip next to a textured star.
 const sculptureMaterial = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
+const hexTexture = createHexTexture();
+const ribbonMaterial = new THREE.MeshStandardMaterial({
+  side: THREE.DoubleSide,
+  bumpMap: hexTexture,
+  bumpScale: 0.006,
+  roughnessMap: hexTexture,
+});
 function applyMaterialPreset(name) {
   const preset = MATERIAL_PRESETS[name] || MATERIAL_PRESETS.bronze;
-  sculptureMaterial.color.setHex(preset.color);
-  sculptureMaterial.metalness = preset.metalness;
+  for (const mat of [sculptureMaterial, ribbonMaterial]) {
+    mat.color.setHex(preset.color);
+    mat.metalness = preset.metalness;
+  }
   sculptureMaterial.roughness = preset.roughness;
+  ribbonMaterial.roughness = preset.roughness;
 }
 applyMaterialPreset('bronze');
 
@@ -139,8 +155,7 @@ function rebuildStars() {
   for (const face of faces) {
     const star = buildStar(face, params);
 
-    const curve = new THREE.CatmullRomCurve3(star.outline, true, 'catmullrom', 0.5);
-    const tubeGeom = new THREE.TubeGeometry(curve, 200, params.tubeRadius, 8, true);
+    const tubeGeom = buildStarTube(star, params.tubeRadius);
     starsGroup.add(new THREE.Mesh(tubeGeom, sculptureMaterial));
 
     if (params.showHexGrid) {
@@ -204,6 +219,11 @@ function rebuildRibbons() {
     pairs.push(p);
   }
 
+  // Match the ribbon's hex-bump tiling density to the star's actual hex-grid
+  // cell size (in world units) so the two read as the same texture at the
+  // same scale, not just the same pattern at an arbitrary size.
+  const textureWorldSize = Math.sqrt(3) * faces[0].R_out * params.hexCellFraction;
+
   for (const { a, b } of pairs) {
     const tipA = tipsByLabel.get(a);
     const tipB = tipsByLabel.get(b);
@@ -213,8 +233,9 @@ function rebuildRibbons() {
       tubeRadius: params.tubeRadius,
       twistTurns: params.twistTurns,
       depthFraction: params.ribbonDepthFraction,
+      textureWorldSize,
     });
-    ribbonsGroup.add(new THREE.Mesh(geometry, sculptureMaterial));
+    ribbonsGroup.add(new THREE.Mesh(geometry, ribbonMaterial));
   }
 }
 
@@ -303,6 +324,9 @@ document.getElementById('hex-grid-mode').addEventListener('change', (e) => {
 });
 document.getElementById('material-select').addEventListener('change', (e) => {
   applyMaterialPreset(e.target.value);
+});
+document.getElementById('panel-toggle').addEventListener('click', () => {
+  document.getElementById('panel').classList.toggle('collapsed');
 });
 
 const autoConnectStatusEl = document.getElementById('auto-connect-status');

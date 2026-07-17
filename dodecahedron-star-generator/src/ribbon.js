@@ -29,6 +29,7 @@ function smoothstep(edge0, edge1, x) {
  * @param {number} [options.twistTurns=0.5] number of full twists along the ribbon (kept low so the strip doesn't fight itself visually)
  * @param {number} [options.leaveFraction=0.22] how far (as a fraction of tip-to-tip distance) the curve travels along each tip's own tangent before the dip - controls how "smoothly" it blends with the arm
  * @param {number} [options.depthFraction=0.9] target radius at the dip point, as a fraction of the endpoints' average distance from the sphere center (e.g. 0.9 = dips only 10% of the way toward the center)
+ * @param {number} [options.textureWorldSize=0.12] world-space size of one texture tile along the ribbon's length, for UV tiling density (matched against the hex-grid cell size so the two read as the same texture)
  * @returns {{geometry: THREE.BufferGeometry, curve: THREE.CatmullRomCurve3}}
  */
 export function buildRibbon(tipA, tipB, options = {}) {
@@ -39,6 +40,7 @@ export function buildRibbon(tipA, tipB, options = {}) {
     twistTurns = 0.5,
     leaveFraction = 0.22,
     depthFraction = 0.9,
+    textureWorldSize = 0.12,
   } = options;
 
   const pA = tipA.position;
@@ -59,8 +61,10 @@ export function buildRibbon(tipA, tipB, options = {}) {
   const curve = new THREE.CatmullRomCurve3([pA, leaveA, dipMid, leaveB, pB], false, 'catmullrom', 0.5);
   const frames = curve.computeFrenetFrames(segments, false);
   const points = curve.getSpacedPoints(segments);
+  const uRepeat = Math.max(curve.getLength() / textureWorldSize, 1);
 
   const positions = new Float32Array((segments + 1) * 2 * 3);
+  const uvs = new Float32Array((segments + 1) * 2 * 2);
   const indices = new Uint32Array(segments * 6);
 
   for (let i = 0; i <= segments; i++) {
@@ -90,6 +94,12 @@ export function buildRibbon(tipA, tipB, options = {}) {
     positions[i * 6 + 4] = edgeB.y;
     positions[i * 6 + 5] = edgeB.z;
 
+    const uvU = t * uRepeat;
+    uvs[i * 4 + 0] = uvU;
+    uvs[i * 4 + 1] = 0;
+    uvs[i * 4 + 2] = uvU;
+    uvs[i * 4 + 3] = 1;
+
     if (i < segments) {
       const a = i * 2;
       const b = i * 2 + 1;
@@ -107,6 +117,7 @@ export function buildRibbon(tipA, tipB, options = {}) {
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeVertexNormals();
 

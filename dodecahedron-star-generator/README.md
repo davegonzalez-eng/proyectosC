@@ -62,7 +62,7 @@ grows with radius:
 
 So the star's center stays put while its outline twists more the further out
 you go — a simple, controllable "pinwheel" distortion. Exposed as the **Swirl**
-slider (0–90°, default 23°).
+slider (0–90°, default 3°).
 
 ### 4b. Arm-axis twist (blade twist)
 
@@ -88,13 +88,12 @@ less symmetric look).
 Two more knobs aimed specifically at making the arm-to-ribbon transition
 read as one continuous curve instead of a rod meeting a star:
 
-- **Arm reach** is just `tipScale` (§3) exposed directly and pushed past
-  1.0 by default (**1.25**) — the arm extends beyond its own pentagon's
-  edge, reaching toward where its ribbon needs to go, so the ribbon has
-  less ground left to cover.
+- **Arm reach** is just `tipScale` (§3) exposed directly (default **0.8**;
+  push it past 1.0 to reach beyond the pentagon's own edge, toward where a
+  ribbon needs to go, leaving it less ground to cover).
 - **Tip curl** adds extra swirl rotation on top of the base swirl,
   concentrated near the tip: `swirlTheta += curl · (r2/R_out)^1.6`. Default
-  **20°**. Combined with arm reach and the earlier-onset tip dip below, the
+  **24°**. Combined with arm reach and the earlier-onset tip dip below, the
   arm spends its last stretch already spiraling and sinking toward the
   ribbon's own trajectory, so the ribbon only has to finish a curve already
   in progress rather than execute a sharp U-turn from a standing start.
@@ -110,7 +109,7 @@ r' = r2 + (r2 / k) · sin(k · r2)
 where `r2` is the point's *original*, undistorted distance to the star's
 center in the face plane (per the spec — swirl and wave are both independent
 functions of `r2`, not of each other's output). `k` controls both the ripple
-frequency and (inversely) its amplitude; default `k = 5`. Exposed as the
+frequency and (inversely) its amplitude; default `k = 2.7`. Exposed as the
 **Wave k** slider, with a checkbox to disable the wave entirely and see the
 plain swirled star.
 
@@ -125,7 +124,7 @@ bulge = bulgeStrength · (1 − (r2 / R_out)²)
 ```
 
 i.e. maximal at the star's center, zero at the pentagon's rim (so neighboring
-faces still meet cleanly at shared edges). Default `bulgeStrength = 0.5`.
+faces still meet cleanly at shared edges). Default `bulgeStrength = 0.2`.
 A true printable/cast curved-surface export is out of scope for this pass.
 
 ### 6b. Tip dip (fusing the arm into its ribbon)
@@ -149,7 +148,7 @@ ribbon, see below) is computed *after* this dip (and after arm reach and
 curl above) are applied, so the ribbon automatically continues whatever
 curve the arm is already tracing — the two read as one continuous surface
 rather than a rod stabbed into a star. Exposed as the **Tip dip** slider
-(0–0.6, default 0.2).
+(0–0.6, default 0.36).
 
 **Why `rFinal` and not the original `r2`:** bulge (§6) and tip dip are both
 now functions of `rFinal = sqrt(u² + w²)`, which is exactly reconstructible
@@ -181,10 +180,10 @@ touching it), which buys two precise guarantees:
 - **Exact dip depth.** The middle "dip" point is placed at a precise target
   radius from the sculpture's center: `depthFraction × avgRadius`, where
   `avgRadius` is the average of the two tips' own distance from center.
-  Default `depthFraction = 0.8` — the ribbon's lowest point sits at 80% of
+  Default `depthFraction = 0.81` — the ribbon's lowest point sits at 81% of
   the face's radius. (Verified numerically: min/max depth ratio across all
-  60 connections is exactly 0.800.) Tunable via the **Ribbon depth** slider
-  (50–100%).
+  60 connections exactly matches the configured fraction.) Tunable via the
+  **Ribbon depth** slider (50–100%).
 
 The cross-section also blends smoothly: its half-width starts at
 `tubeRadius` (matching the star tube's own thickness) right at each tip and
@@ -194,6 +193,32 @@ tube. A twisted flat strip is then built along the curve using Frenet frames
 plus a continuously increasing twist angle (**Ribbon twist** slider, in full
 turns; default **0.5**, a single half-turn — kept low so the strip doesn't
 fight itself visually across many simultaneous ribbons).
+
+### 7b. Flattening the star tube into its ribbon (no more rounded cap)
+
+Even with the tangent and width matched at the join (above), the star's own
+tube kept a constant *circular* cross-section all the way to the tip, while
+the ribbon starts as a *flat* sliver of the same half-width - a shape
+mismatch that read as a small rounded cap right where the ribbon should
+begin. `src/startube.js:buildStarTube()` replaces the plain
+`THREE.TubeGeometry` (which can't vary its cross-section) with a
+custom-built tube whose cross-section is circular through the middle of
+each arm/inner-point stretch and tapers to a flat, `tubeRadius`-wide sliver
+right at each tip:
+
+```
+minorAxis(t) = lerp(tubeRadius, tubeRadius · 0.12, tipFlatness(t))
+majorAxis(t) = tubeRadius                              // constant - this is the "width" that carries over into the ribbon
+```
+
+`tipFlatness(t)` ramps in over the last 5% of curve-parameter distance to
+each of the 5 tip points (mirroring the ribbon's own tapering zone), using
+the tube's own Frenet frame (normal = major/width axis, binormal =
+minor/thickness axis that shrinks). The minor axis never fully collapses to
+zero, which would produce degenerate normals right at the tip - it shrinks
+to 12% of `tubeRadius` instead, reading as flat without a shading glitch.
+(Verified numerically: cross-section at a tip has minor/major axis ratio of
+exactly 0.12, vs. a perfect circle - ratio 1.0 - one full arm-length away.)
 
 ### 8. Specifying connections
 
@@ -277,9 +302,10 @@ space with no original `r2` to place them from - see the `rFinal` note in
 
 ### 11. Materials
 
-A single `MeshStandardMaterial` is shared across the stars, ribbons, and
-membranes (so the piece reads as one cast/printed material, not mixed
-parts), switchable from the **Material** dropdown:
+Two `MeshStandardMaterial` instances - one for the stars/membranes, one for
+ribbons - are kept in sync on color/metalness/roughness (so the piece reads
+as one cast/printed material, not mixed parts) and switchable from the
+**Material** dropdown:
 
 - **Bronze** — warm gold, metalness 0.75, roughness 0.32 (the original look)
 - **Titanium** — cool grey, metalness 0.9, roughness 0.45 (brushed, not mirror-like)
@@ -290,14 +316,33 @@ needed) is set as `scene.environment` so the metallic presets — especially
 the near-mirror chrome one — actually show reflections instead of reading
 flat and dark.
 
+The ribbon material additionally carries a hex-pattern bump/roughness map
+(`src/hextexture.js:createHexTexture()`) — a small canvas of hexagon
+outlines, sized so it tiles seamlessly (`THREE.RepeatWrapping`) — so the
+ribbon reads as "the same texture" as the star's own 3D hex-grid fill (§10),
+just applied as a relief pattern rather than literal geometry (a ribbon
+twists too much along its length for tiling actual 3D hex struts onto it to
+be practical). `buildRibbon()` writes UV coordinates from actual arc length
+(via `curve.getLength()`), and the tiling density is matched to the real
+world-space hex-grid cell size (`sqrt(3) × R_out × hexCellFraction`) so the
+two don't just share a pattern but the same apparent scale.
+
+### 12. Collapsing the control panel
+
+The chevron button in the panel's corner toggles a `.collapsed` class on
+the panel, hiding everything below the title/subtitle. Pure CSS/JS, no
+persistence across reloads.
+
 ## File layout
 
 ```
-index.html            page shell, control panel, import map
+index.html            page shell, collapsible control panel, import map
 src/geometry.js        dodecahedron construction, per-face star math, adjacency-connection rule
 src/ribbon.js          spline-based ribbon geometry (precise dip depth + tangent-matched joins) between two arm tips
+src/startube.js         variable-cross-section star tube (round mid-arm, flattens to ribbon width at each tip)
 src/membrane.js         thin triangulated fill surface for a star's interior
 src/hexgrid.js           clipped hexagonal-grid fill surface for a star's interior
+src/hextexture.js        procedural tileable hex-pattern canvas texture, applied as a bump map on ribbons
 src/main.js             Three.js scene, materials/environment, UI wiring, labels, picking, render loop
 vendor/three/           vendored Three.js build + OrbitControls + CSS2DRenderer + RoomEnvironment (no CDN/network dependency)
 ```
@@ -313,22 +358,26 @@ vendor/three/           vendored Three.js build + OrbitControls + CSS2DRenderer 
   exactly 2 (min = max = 2) for all of them.
 - `buildRibbon()` checked standalone under Node across all 60 connection
   pairs with the new defaults: depth ratio (min radius along the curve ÷
-  average endpoint radius) is exactly 0.800 in every case, and worst-case
-  tangent misalignment between the curve's initial tangent and the tip's
-  own arm-tangent is 0.40°.
+  average endpoint radius) exactly matches the configured `depthFraction` in
+  every case, and worst-case tangent misalignment between the curve's
+  initial tangent and the tip's own arm-tangent is 0.40°.
 - The hex-grid continuity fix checked standalone under Node: replicating
   `buildHexGrid()`'s point-placement formula and comparing it against every
   point on a star's own outline gives a max distance of `0.00000000` -
   exact, not approximate (this is what the `rFinal`-instead-of-`r2` change
   in §6b buys).
+- `buildStarTube()` checked standalone under Node: 1600 vertices / 9600
+  indices for the default 200×8 resolution, no NaNs, and the cross-section
+  at a tip parameter has minor/major axis ratio 0.12 vs. 1.0 (a full circle)
+  one arm-length away - the taper is real, not cosmetic.
 - Star outline triangulation (`buildMembrane`) and hex-grid clipping
   (`buildHexGrid`) checked standalone: expected triangle counts, no NaNs.
-- Full app checked in headless Chromium: renders with zero console errors;
-  every slider (swirl/arm-twist/arm reach/tip curl/k/bulge/tip dip/tube
-  radius/twist/ribbon depth/hex cell size) and toggle (membrane, hex grid,
-  material) visibly does what it says; arm-tip markers confirmed invisible
-  in the default render; the hex grid now sits visibly flush against the
-  tube boundary instead of drifting away from it near the edges.
+- Full app checked in headless Chromium: renders with zero console errors
+  against every default in this pass; the collapse chevron hides/shows the
+  panel; the hex bump texture is visible on ribbon surfaces at close range
+  and reads at the same scale as the star's own hex-grid fill; the round
+  tube visibly narrows into flat ribbon width approaching each tip instead
+  of ending in a rounded cap.
 
 ## Possible next steps
 
