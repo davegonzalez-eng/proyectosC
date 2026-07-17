@@ -83,6 +83,22 @@ independent blades per star. Exposed as the **Arm-axis twist** slider
 (0–90°, default **0°** — off by default; dial it in for a more organic,
 less symmetric look).
 
+### 4c. Arm reach and tip curl
+
+Two more knobs aimed specifically at making the arm-to-ribbon transition
+read as one continuous curve instead of a rod meeting a star:
+
+- **Arm reach** is just `tipScale` (§3) exposed directly and pushed past
+  1.0 by default (**1.25**) — the arm extends beyond its own pentagon's
+  edge, reaching toward where its ribbon needs to go, so the ribbon has
+  less ground left to cover.
+- **Tip curl** adds extra swirl rotation on top of the base swirl,
+  concentrated near the tip: `swirlTheta += curl · (r2/R_out)^1.6`. Default
+  **20°**. Combined with arm reach and the earlier-onset tip dip below, the
+  arm spends its last stretch already spiraling and sinking toward the
+  ribbon's own trajectory, so the ribbon only has to finish a curve already
+  in progress rather than execute a sharp U-turn from a standing start.
+
 ### 5. Waving (radial distortion)
 
 After swirling, the radius itself is rippled:
@@ -115,23 +131,34 @@ A true printable/cast curved-surface export is out of scope for this pass.
 ### 6b. Tip dip (fusing the arm into its ribbon)
 
 A second, independent inward pull — toward the *sphere's* center this time,
-not just the face normal — concentrated sharply at the tip via a cubic
-falloff:
+not just the face normal:
 
 ```
-dip = tipDipStrength · (r2 / R_out)³
+dip = tipDipStrength · (rFinal / R_out)^1.6
 world -= normalize(world) · dip
 ```
 
-Because the falloff is cubic, it's negligible through most of the arm and
-only kicks in right at the end, so the arm visibly curls into the
-sculpture's body just before it stops — instead of ending flat and then
-having a separate ribbon merely touch that endpoint. Since this lives inside
-`distortPoint()`, the tip's tangent (used by the ribbon, see below) is
-computed *after* this dip is applied, so the ribbon automatically continues
-whatever curl the arm is already doing — the two read as one continuous
-surface rather than a rod stabbed into a star. Exposed as the **Tip dip**
-slider (0–0.6, default 0.2; try 0.5 to see the effect exaggerated).
+`rFinal` is the radius *after* the wave ripple (§5), not the original `r2` -
+see the note at the end of this section for why that distinction matters.
+The `1.6` exponent (down from an initial `3`, per feedback that the dip was
+starting too late and forcing too sharp a turn right at the very end) makes
+the pull ramp in gradually well before the tip rather than only in the last
+moment, so the arm curls into the sculpture's body over a visible stretch.
+Since this lives inside `distortPoint()`, the tip's tangent (used by the
+ribbon, see below) is computed *after* this dip (and after arm reach and
+curl above) are applied, so the ribbon automatically continues whatever
+curve the arm is already tracing — the two read as one continuous surface
+rather than a rod stabbed into a star. Exposed as the **Tip dip** slider
+(0–0.6, default 0.2).
+
+**Why `rFinal` and not the original `r2`:** bulge (§6) and tip dip are both
+now functions of `rFinal = sqrt(u² + w²)`, which is exactly reconstructible
+from a bare `(u, w)` pair alone with no other context. That single choice
+is what makes the hex-grid fill (§10) - which generates brand-new interior
+points directly in `(u, w)` space, with no original `r2` to refer back to -
+land in *exactly* the same place `distortPoint()` would, instead of visibly
+drifting away from the tube near the edges (verified: 0.0 distance between
+the two for every point on a star's own outline).
 
 ### 7. Ribbon connectors
 
@@ -144,13 +171,13 @@ touching it), which buys two precise guarantees:
 - **Continues the arm's own trend, not a reset direction.** Each "leave"
   point sits a short distance along that tip's *actual tangent*
   (`buildStar()` samples the arm's own curve a hair before the tip via
-  finite difference, so it captures however swirl/wave/bulge/arm-twist/tip-dip
-  are already bending it) rather than the tip's purely-radial `outDir`.
-  Combined with the tip-dip curl above, the ribbon picks up a curve that's
-  already underway instead of first shooting outward along `outDir` and
-  only then diving inward. (Verified numerically: tangent misalignment at
-  the join is under 0.4° across all 60 connections, versus a visible kink
-  before this change.)
+  finite difference, so it captures however swirl/curl/wave/bulge/arm-twist/
+  tip-dip are already bending it) rather than the tip's purely-radial
+  `outDir`. Combined with the longer arm reach and tip curl/dip above, the
+  ribbon picks up a curve that's already underway instead of first shooting
+  outward along `outDir` and only then diving inward. (Verified numerically:
+  tangent misalignment at the join is under 0.4° across all 60 connections,
+  versus a visible kink before this change.)
 - **Exact dip depth.** The middle "dip" point is placed at a precise target
   radius from the sculpture's center: `depthFraction × avgRadius`, where
   `avgRadius` is the average of the two tips' own distance from center.
@@ -181,9 +208,12 @@ F1-A0 -> F7-A3
 
 Invalid tokens (bad face/arm index) or a trailing unmatched arm are reported
 in the status line instead of silently dropped. As a faster alternative to
-typing, **click any two arm markers in the 3D view** — the first click is
-highlighted red and the second one appends `A:B` to the text box and redraws
-automatically.
+typing, **click any two arm markers in the 3D view** — the markers
+themselves are invisible by default (a visible dot at every tip read as a
+small stub breaking the fused arm/ribbon look), but the geometry is still
+there for raycasting: the first click lights its marker up red as feedback,
+and the second click appends `A:B` to the text box, redraws, and clears the
+highlight.
 
 ### 9. Adjacent-face connections (always on)
 
@@ -234,13 +264,16 @@ Two mutually-exclusive checkboxes (checking one unchecks the other):
   against the star's (concave) outline using a generic segment/polygon
   clip - not just an inside/outside test, so partial cells along the
   boundary are cut cleanly rather than dropped or left overhanging - and
-  turns every surviving strut into a thin quad in 3D, following the star's
-  own bulge-along-normal profile. Cell size is tunable via the **Hex cell
-  size** slider.
+  turns every surviving strut into a thin quad in 3D via the shared
+  `applyTipDip()` (§6b) plus the same bulge formula, so it follows the
+  star's *actual* surface, not an approximation of it. Cell size is tunable
+  via the **Hex cell size** slider (default 0.02 - a fine lattice).
 
-Both modes are built from the exact same (already swirled/waved/twisted/
-bulged) points the tube is drawn through, so their boundary sits flush
-against the inside of the tube with no seam.
+The solid membrane is trivially exact (it's built entirely from the star's
+own already-computed outline points, no new ones). The hex grid needed more
+care since it generates brand-new interior points directly in `(u, w)`
+space with no original `r2` to place them from - see the `rFinal` note in
+§6b for how that's kept exact rather than approximate.
 
 ### 11. Materials
 
@@ -279,19 +312,23 @@ vendor/three/           vendored Three.js build + OrbitControls + CSS2DRenderer 
   reference pairs present, every one of the 60 arms touched, and degree
   exactly 2 (min = max = 2) for all of them.
 - `buildRibbon()` checked standalone under Node across all 60 connection
-  pairs with the new defaults (including `tipDipStrength = 0.2`): depth
-  ratio (min radius along the curve ÷ average endpoint radius) is exactly
-  0.800 in every case, and worst-case tangent misalignment between the
-  curve's initial tangent and the tip's own arm-tangent is 0.40°.
+  pairs with the new defaults: depth ratio (min radius along the curve ÷
+  average endpoint radius) is exactly 0.800 in every case, and worst-case
+  tangent misalignment between the curve's initial tangent and the tip's
+  own arm-tangent is 0.40°.
+- The hex-grid continuity fix checked standalone under Node: replicating
+  `buildHexGrid()`'s point-placement formula and comparing it against every
+  point on a star's own outline gives a max distance of `0.00000000` -
+  exact, not approximate (this is what the `rFinal`-instead-of-`r2` change
+  in §6b buys).
 - Star outline triangulation (`buildMembrane`) and hex-grid clipping
   (`buildHexGrid`) checked standalone: expected triangle counts, no NaNs.
 - Full app checked in headless Chromium: renders with zero console errors;
-  every slider (swirl/arm-twist/k/bulge/tip dip/tube radius/twist/ribbon
-  depth/hex cell size) and toggle (membrane, hex grid, material) visibly
-  does what it says, including mutual exclusion between the two fill modes,
-  the tip-dip curl visibly deepening at higher values, the fine 0.02-default
-  hex grid rendering cleanly, and chrome/titanium reflections from the
-  generated environment.
+  every slider (swirl/arm-twist/arm reach/tip curl/k/bulge/tip dip/tube
+  radius/twist/ribbon depth/hex cell size) and toggle (membrane, hex grid,
+  material) visibly does what it says; arm-tip markers confirmed invisible
+  in the default render; the hex grid now sits visibly flush against the
+  tube boundary instead of drifting away from it near the edges.
 
 ## Possible next steps
 

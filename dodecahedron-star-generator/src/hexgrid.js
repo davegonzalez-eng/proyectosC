@@ -2,10 +2,12 @@
 // alternative to the solid membrane fill: a pointy-top hex grid is tiled
 // over the star's local 2D (u, w) coordinates, clipped to the star's
 // (possibly concave) outline, and each surviving strut is turned into a
-// thin flat quad in 3D following the same bulge-along-normal profile as
-// the star itself, so the lattice sits on the same curved surface.
+// thin flat quad in 3D following the same bulge + tip-dip profile as the
+// star itself (via the shared `applyTipDip`), so the lattice sits flush on
+// the same surface instead of drifting away from it near the edges.
 
 import * as THREE from 'three';
+import { applyTipDip } from './geometry.js';
 
 function pointInPolygon(pt, poly) {
   let inside = false;
@@ -109,11 +111,11 @@ export function hexGridEdges(polygon, cellSize) {
  *
  * @param {Face} face
  * @param {{outline2D: {u:number,w:number}[]}} star
- * @param {object} params bulgeStrength, plus cellSize/strutWidth overrides
+ * @param {object} params bulgeStrength, tipDipStrength, plus cellSize/strutWidth overrides
  * @returns {THREE.BufferGeometry}
  */
 export function buildHexGrid(face, star, params) {
-  const { cellFraction = 0.22, strutWidth = 0.015, bulgeStrength = 0 } = params;
+  const { cellFraction = 0.22, strutWidth = 0.015, bulgeStrength = 0, tipDipStrength = 0 } = params;
   const cellSize = face.R_out * cellFraction;
   const polygon = star.outline2D.map((p) => ({ x: p.u, y: p.w }));
   const edges = hexGridEdges(polygon, cellSize);
@@ -121,7 +123,8 @@ export function buildHexGrid(face, star, params) {
   const place = (u, w) => {
     const r2 = Math.sqrt(u * u + w * w);
     const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r2 / face.R_out, 2)) : 0;
-    return face.center.clone().addScaledVector(face.U, u).addScaledVector(face.W, w).addScaledVector(face.normal, bulge);
+    const world = face.center.clone().addScaledVector(face.U, u).addScaledVector(face.W, w).addScaledVector(face.normal, bulge);
+    return applyTipDip(world, r2, face, tipDipStrength);
   };
 
   const positions = [];

@@ -31,6 +31,35 @@ const ICOSA_FACES = [
 
 const ARMS_PER_FACE = 5;
 
+// Exponent controlling how early the tip-dip pull "kicks in" along an arm's
+// length. Lower = starts sooner / more gradual ramp (still reaches exactly
+// `tipDipStrength` when the post-wave radius equals R_out, regardless of
+// exponent, since (r/R)^n = 1 there for any n - only the onset shape changes).
+const TIP_DIP_POWER = 1.6;
+// Exponent for the extra "curl" rotation layered near the tip - separate
+// from TIP_DIP_POWER so the curl and the inward pull can ramp at different
+// rates if tuned differently later.
+const CURL_POWER = 1.6;
+
+/**
+ * Pull `world` inward toward the sphere's center (the origin, since the
+ * dodecahedron is built centered there), by an amount that grows with
+ * `radius` and is concentrated near a star's tip. Shared by both the
+ * star's own point placement (`distortPoint`) and anything else that needs
+ * to place points consistent with the star surface (e.g. the hex-grid
+ * fill), so the two can't drift apart the way an inlined duplicate would.
+ *
+ * `radius` must be the *post-wave* radius (sqrt(u^2 + w^2) in the face's
+ * local frame), not the original undistorted one - that's what makes this
+ * reconstructible from a bare (u, w) pair with no other context, which the
+ * hex-grid fill's newly-generated interior points depend on.
+ */
+export function applyTipDip(world, radius, face, tipDipStrength) {
+  if (!tipDipStrength) return world;
+  const dip = tipDipStrength * Math.pow(radius / face.R_out, TIP_DIP_POWER);
+  return world.addScaledVector(world.clone().normalize(), -dip);
+}
+
 /**
  * Build the 12 pentagonal faces of a regular dodecahedron, each with a
  * local right-handed (U, W, N) frame suitable for drawing a flat 2D star
@@ -107,6 +136,9 @@ export function buildDodecahedron(radius = 1) {
  * Distort a single (angle, radius) polar sample with:
  *   - a counter-clockwise swirl (about the face normal) whose strength
  *     grows with radius
+ *   - a "curl": extra swirl rotation layered on top, concentrated near the
+ *     tip (r2/R_out)^CURL_POWER - so the arm spirals a bit as it approaches
+ *     its end rather than sweeping at one constant rate the whole way
  *   - a radial "wave" ripple: r' = r + (r/k) * sin(k * r)
  *   - an optional dome bulge along the face normal
  *   - a second, independent "blade" twist about the arm's own outward axis
@@ -114,20 +146,26 @@ export function buildDodecahedron(radius = 1) {
  *     out of the face plane the further out it sits - like a propeller
  *     blade twisting along its own length, layered on top of the in-plane
  *     swirl rather than replacing it
- *   - a "tip dip": an inward pull toward the *sphere's* center (not just
- *     the face normal), growing sharply (r2/R_out)^3 so it's concentrated
- *     right at the tip - the arm curls into the body just before its end,
- *     instead of stopping flat, so a ribbon leaving from there is picking
- *     up a curve that's already underway rather than starting cold
+ *   - a "tip dip" (see `applyTipDip`): an inward pull toward the *sphere's*
+ *     center, ramping up gradually well before the tip rather than only in
+ *     the last moment, so the arm curls into the body over a visible
+ *     stretch instead of turning sharply right at the very end
  *
  * r2 (the "distance to star center") is always the *undistorted* radius,
- * matching the spec: the wave and swirl amounts are both functions of the
- * original r2, not of each other.
+ * matching the spec: swirl, curl and wave are all functions of the original
+ * r2, not of each other. Bulge and tip-dip, however, are deliberately
+ * functions of `rFinal` (the radius *after* the wave) rather than r2 - that
+ * makes them exactly reconstructible from a bare (u, w) pair alone
+ * (rFinal = sqrt(u^2 + w^2) by construction), which anything that needs to
+ * place *new* points directly in (u, w) space - the hex-grid fill, which
+ * doesn't have an original r2 to work from - depends on to stay flush with
+ * the star's own surface.
  */
 function distortPoint(face, angle, r2, armAxis, params) {
-  const { swirlRad, k, waveEnabled, bulgeStrength, armTwistRad, tipDipStrength } = params;
+  const { swirlRad, k, waveEnabled, bulgeStrength, armTwistRad, tipDipStrength, curlRad } = params;
 
-  const swirlTheta = angle + swirlRad * (r2 / face.R_out);
+  const curl = curlRad ? curlRad * Math.pow(r2 / face.R_out, CURL_POWER) : 0;
+  const swirlTheta = angle + swirlRad * (r2 / face.R_out) + curl;
 
   let rFinal = r2;
   if (waveEnabled && k !== 0) {
@@ -138,7 +176,7 @@ function distortPoint(face, angle, r2, armAxis, params) {
   const w = rFinal * Math.sin(swirlTheta);
 
   const bulge = bulgeStrength
-    ? bulgeStrength * (1 - Math.pow(r2 / face.R_out, 2))
+    ? bulgeStrength * (1 - Math.pow(rFinal / face.R_out, 2))
     : 0;
 
   const offset = face.U.clone()
@@ -150,12 +188,7 @@ function distortPoint(face, angle, r2, armAxis, params) {
     offset.applyAxisAngle(armAxis, armTwistRad * (r2 / face.R_out));
   }
 
-  const world = face.center.clone().add(offset);
-
-  if (tipDipStrength) {
-    const dip = tipDipStrength * Math.pow(r2 / face.R_out, 3);
-    world.addScaledVector(world.clone().normalize(), -dip);
-  }
+  const world = applyTipDip(face.center.clone().add(offset), rFinal, face, tipDipStrength);
 
   return { world, u, w };
 }
@@ -172,13 +205,15 @@ function distortPoint(face, angle, r2, armAxis, params) {
  * @param {number} params.tipScale   outer-vertex radius as a fraction of R_out (<=1, gives breathing room from the face edge)
  * @param {number} params.bulgeStrength dome height at the face center (0 = flat)
  * @param {number} params.armTwistDeg  second "blade" swirl (deg) about each arm's own outward axis, applied at r = R_out
- * @param {number} params.tipDipStrength inward pull toward the sphere's center, concentrated near the tip (world units at r2 = R_out)
+ * @param {number} params.tipDipStrength inward pull toward the sphere's center, ramping in ahead of the tip (world units at r2 = R_out)
+ * @param {number} params.curlDeg     extra swirl rotation (deg) concentrated near the tip, applied at r2 = R_out
  * @returns {StarResult}
  */
 export function buildStar(face, params) {
   const swirlRad = THREE.MathUtils.degToRad(params.swirlDeg || 0);
   const armTwistRad = THREE.MathUtils.degToRad(params.armTwistDeg || 0);
-  const p = { ...params, swirlRad, armTwistRad };
+  const curlRad = THREE.MathUtils.degToRad(params.curlDeg || 0);
+  const p = { ...params, swirlRad, armTwistRad, curlRad };
 
   const baseAngle = (i) => {
     const v = face.vertices3D[i].clone().sub(face.center);

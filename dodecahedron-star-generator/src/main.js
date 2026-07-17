@@ -16,9 +16,10 @@ const params = {
   k: 5,
   waveEnabled: true,
   innerRatio: 0.382,
-  tipScale: 0.96,
+  tipScale: 1.25,
   bulgeStrength: 0.5,
   armTwistDeg: 0,
+  curlDeg: 20,
   tipDipStrength: 0.2,
   tubeRadius: 0.03,
   twistTurns: 0.5,
@@ -103,7 +104,11 @@ function applyMaterialPreset(name) {
 }
 applyMaterialPreset('bronze');
 
-const markerMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.2, roughness: 0.6 });
+// Arm-tip markers exist for click-to-pick raycasting, not to be seen - a
+// visible dot right where the ribbon should fuse with the arm reads as a
+// small tip stuck on the end, breaking the continuous look. Invisible by
+// default; only the one currently picked lights up as feedback.
+const markerMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, transparent: true, opacity: 0 });
 const markerPickedMaterial = new THREE.MeshStandardMaterial({ color: 0xff5050, metalness: 0.2, roughness: 0.4 });
 
 const starsGroup = new THREE.Group();
@@ -142,6 +147,7 @@ function rebuildStars() {
       const hexGeom = buildHexGrid(face, star, {
         cellFraction: params.hexCellFraction,
         bulgeStrength: params.bulgeStrength,
+        tipDipStrength: params.tipDipStrength,
       });
       membraneGroup.add(new THREE.Mesh(hexGeom, sculptureMaterial));
     } else if (params.showMembrane) {
@@ -251,9 +257,11 @@ function bindSlider(id, key, { toParam = (v) => v, format = (v) => v } = {}) {
 
 bindSlider('swirl', 'swirlDeg', { format: (v) => `${v.toFixed(0)}°` });
 bindSlider('armTwist', 'armTwistDeg', { format: (v) => `${v.toFixed(0)}°` });
+bindSlider('curl', 'curlDeg', { format: (v) => `${v.toFixed(0)}°` });
 bindSlider('k', 'k', { format: (v) => v.toFixed(1) });
 bindSlider('bulge', 'bulgeStrength', { format: (v) => v.toFixed(2) });
 bindSlider('tipDip', 'tipDipStrength', { format: (v) => v.toFixed(2) });
+bindSlider('armReach', 'tipScale', { format: (v) => v.toFixed(2) });
 bindSlider('tubeRadius', 'tubeRadius', { format: (v) => v.toFixed(3) });
 bindSlider('twist', 'twistTurns', { format: (v) => v.toFixed(1) });
 bindSlider('ribbonDepth', 'ribbonDepthFraction', {
