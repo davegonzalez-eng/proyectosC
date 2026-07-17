@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dodecahedron Star Generator — Quin study</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #0b0d12; overflow: hidden; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; color: #e8e8ec; }
+
+    #scene-container { position: fixed; inset: 0; }
+    #scene-container canvas { display: block; }
+
+    .face-label {
+      color: #7fd1ff;
+      font-size: 12px;
+      font-weight: 600;
+      text-shadow: 0 0 4px #000, 0 0 4px #000;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    .arm-label {
+      color: #ffd27f;
+      font-size: 10px;
+      text-shadow: 0 0 3px #000, 0 0 3px #000;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    #panel {
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      width: 320px;
+      max-height: calc(100vh - 28px);
+      overflow-y: auto;
+      background: rgba(18, 20, 26, 0.88);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 16px;
+      backdrop-filter: blur(6px);
+      font-size: 13px;
+    }
+    #panel h1 { font-size: 15px; margin: 0 0 4px; }
+    #panel p.sub { margin: 0 0 14px; color: #9aa0ac; line-height: 1.4; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .row label { flex: 0 0 auto; color: #c7cad1; }
+    .row input[type="range"] { flex: 1 1 auto; margin: 0 8px; }
+    .row .val { flex: 0 0 42px; text-align: right; color: #7fd1ff; font-variant-numeric: tabular-nums; }
+    .check-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: #c7cad1; }
+    hr { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 14px 0; }
+    textarea {
+      width: 100%; min-height: 64px; resize: vertical;
+      background: #0e1015; color: #e8e8ec; border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px; padding: 8px; font-family: monospace; font-size: 12px;
+    }
+    .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+    button {
+      background: #2a3a4d; color: #e8e8ec; border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 12px;
+    }
+    button:hover { background: #35506b; }
+    #connections-status { margin-top: 8px; color: #9aa0ac; font-size: 11px; min-height: 14px; }
+    .hint { color: #7d8290; font-size: 11px; line-height: 1.4; margin-top: 6px; }
+    code { background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div id="scene-container"></div>
+
+  <div id="panel">
+    <h1>Dodecahedron Star Generator</h1>
+    <p class="sub">A Quin-style study: swirled &amp; waving stars on each pentagonal face, connected by ribbons.</p>
+
+    <div class="row">
+      <label for="swirl">Swirl</label>
+      <input id="swirl" type="range" min="0" max="90" step="1" value="30" />
+      <span class="val" id="swirl-value"></span>
+    </div>
+    <div class="row">
+      <label for="k">Wave k</label>
+      <input id="k" type="range" min="0.5" max="14" step="0.1" value="4" />
+      <span class="val" id="k-value"></span>
+    </div>
+    <div class="check-row">
+      <input type="checkbox" id="wave-enabled" checked />
+      <label for="wave-enabled">Enable radial wave</label>
+    </div>
+    <div class="row">
+      <label for="bulge">Bulge</label>
+      <input id="bulge" type="range" min="0" max="0.6" step="0.01" value="0" />
+      <span class="val" id="bulge-value"></span>
+    </div>
+    <div class="row">
+      <label for="tubeRadius">Tube r</label>
+      <input id="tubeRadius" type="range" min="0.008" max="0.06" step="0.001" value="0.025" />
+      <span class="val" id="tubeRadius-value"></span>
+    </div>
+    <div class="row">
+      <label for="twist">Ribbon twist</label>
+      <input id="twist" type="range" min="0" max="4" step="0.1" value="1" />
+      <span class="val" id="twist-value"></span>
+    </div>
+    <div class="check-row">
+      <input type="checkbox" id="face-labels" checked />
+      <label for="face-labels">Show face labels (F0..F11)</label>
+    </div>
+    <div class="check-row">
+      <input type="checkbox" id="arm-labels" checked />
+      <label for="arm-labels">Show arm labels (F#-A0..A4)</label>
+    </div>
+
+    <hr />
+
+    <label for="connections-input"><strong>Ribbon connections</strong></label>
+    <div class="hint">
+      List arm pairs to connect, e.g. <code>F0-A2:F5-A1, F2-A3:F9-A0</code>.
+      Or just click two arm markers in the 3D view to add a pair automatically.
+    </div>
+    <textarea id="connections-input" placeholder="F0-A2:F5-A1, F2-A3:F9-A0"></textarea>
+    <div class="btn-row">
+      <button id="connect-btn">Draw ribbons</button>
+      <button id="clear-btn">Clear</button>
+    </div>
+    <div id="connections-status"></div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.min.js"
+      }
+    }
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
