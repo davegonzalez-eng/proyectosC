@@ -180,6 +180,17 @@
       sculpture's center (93% = stays just under the surface).
     </div>
     <div class="row">
+      <label for="jointSink">Joint sink</label>
+      <input id="jointSink" type="range" min="0" max="0.4" step="0.01" value="0" />
+      <span class="val" id="jointSink-value"></span>
+    </div>
+    <div class="hint" style="margin-top: -6px;">
+      Pulls the arm-tip / ribbon interconnection points radially inward
+      (the fixed anchors that the Ribbon depth slider doesn't move) - tube
+      cut edges, tips, and ribbon ends all sink together, so the fusion
+      stays seamless. 0 keeps them at the surface.
+    </div>
+    <div class="row">
       <label for="ribbonThick">Ribbon thick</label>
       <input id="ribbonThick" type="range" min="0.002" max="0.05" step="0.001" value="0.012" />
       <span class="val" id="ribbonThick-value"></span>

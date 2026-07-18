@@ -184,6 +184,17 @@ touching it), which buys two precise guarantees:
   the face's radius, staying just under the surface. (Verified numerically:
   min/max depth ratio across all 60 connections exactly matches the
   configured fraction.) Tunable via the **Ribbon depth** slider (50–100%).
+- **Sinkable junctions.** Ribbon depth only moves the mid-dip; the junction
+  anchors — arm tips, tube cut edges, ribbon endpoints — stay at the star
+  surface by default. The **Joint sink** slider (0–0.4, default 0) pulls
+  that whole junction set radially inward toward the sphere's center: the
+  tube sinks its rings near each cut edge (full strength at the edge,
+  fading to zero a short parameter distance into the segment), the
+  returned cut points carry the same full-strength sink, and the ribbon
+  sinks its tip endpoints identically — so all three stay coincident and
+  the fusion remains watertight at any slider value. (Verified numerically
+  at sink = 0.2: cut radii reduced by exactly 0.2, ribbon endpoints
+  coincide with the sunk cut edges to 0.0 deviation.)
 
 The cross-section also blends smoothly: its half-width starts at
 `tubeRadius` (matching the tube's flattened cut edge, below) at each end and

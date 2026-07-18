@@ -27,6 +27,7 @@ const params = {
   twistTurns: 0.5,
   ribbonHalfWidth: 0.09,
   ribbonDepthFraction: 0.93,
+  junctionSink: 0,
   ribbonThickness: 0.012,
   fillThickness: 0.012,
   organicJitter: 0.35,
@@ -201,7 +202,9 @@ function rebuildStars() {
   for (const face of faces) {
     const star = buildStar(face, params);
 
-    const { geometry: tubeGeom, cuts } = buildStarTube(star, params.tubeRadius);
+    const { geometry: tubeGeom, cuts } = buildStarTube(star, params.tubeRadius, {
+      junctionSink: params.junctionSink,
+    });
     starsGroup.add(new THREE.Mesh(tubeGeom, sculptureMaterial));
 
     if (params.showHexGrid) {
@@ -291,6 +294,7 @@ function rebuildRibbons() {
       tubeRadius: params.tubeRadius,
       twistTurns: params.twistTurns,
       depthFraction: params.ribbonDepthFraction,
+      junctionSink: params.junctionSink,
       textureWorldSize,
       thickness: params.ribbonThickness,
       // Match the tube's flattened cut-edge thickness (2 x its minor axis,
@@ -353,6 +357,7 @@ bindSlider('ribbonDepth', 'ribbonDepthFraction', {
   toParam: (v) => v / 100,
   format: (v) => `${Math.round(v * 100)}%`,
 });
+bindSlider('jointSink', 'junctionSink', { format: (v) => v.toFixed(2) });
 bindSlider('ribbonThick', 'ribbonThickness', { format: (v) => v.toFixed(3) });
 bindSlider('fillThick', 'fillThickness', { format: (v) => v.toFixed(3) });
 bindSlider('hexCell', 'hexCellFraction', { format: (v) => v.toFixed(3) });

@@ -37,6 +37,8 @@ function smoothstep(edge0, edge1, x) {
  * @param {number} [options.radialSegments=8]
  * @param {number} [options.cutWindow=0.04] half-size (in arc-length parameter, 0-1) of the removed window centered on each tip
  * @param {number} [options.taper=0.035] parameter distance over which each segment flattens toward its cut ends
+ * @param {number} [options.junctionSink=0] radial pull (world units, toward the sphere center) applied at the cut edges, fading out over sinkSpan into each segment
+ * @param {number} [options.sinkSpan=0.05] parameter distance over which the junction sink fades to zero
  * @returns {{geometry: THREE.BufferGeometry, cuts: Array<{asc: THREE.Vector3, desc: THREE.Vector3}>}}
  *   cuts[k] holds the two cut-edge centers for tip/arm k: `asc` on the side
  *   approached from the previous inner point, `desc` on the side toward the
@@ -48,9 +50,22 @@ export function buildStarTube(star, tubeRadius, options = {}) {
     radialSegments = 8,
     cutWindow = 0.04,
     taper = 0.035,
+    junctionSink = 0,
+    sinkSpan = 0.05,
   } = options;
 
   const curve = new THREE.CatmullRomCurve3(star.outline, true, 'catmullrom', 0.5);
+
+  // Radial pull toward the sphere's center, full strength at a segment's
+  // cut edges and fading to zero `sinkSpan` (curve parameter) into the
+  // segment - so the arm/ribbon junction as a whole can be sunk to a lower
+  // radius without moving the rest of the star. The ribbon endpoints and
+  // the returned cut points get the identical full-strength sink, keeping
+  // the fusion watertight at any slider value.
+  const sinkAt = (distToEnd) =>
+    junctionSink ? junctionSink * (1 - smoothstep(0, sinkSpan, distToEnd)) : 0;
+  const applySink = (p, amount) =>
+    amount ? p.addScaledVector(p.clone().normalize(), -amount) : p;
 
   const positions = [];
   const indices = [];
@@ -67,7 +82,7 @@ export function buildStarTube(star, tubeRadius, options = {}) {
       const distToEnd = Math.min(u - u0, u1 - u);
       const minorScale = THREE.MathUtils.lerp(FLAT_MINOR_FRACTION, 1, smoothstep(0, taper, distToEnd));
 
-      const p = curve.getPointAt(u);
+      const p = applySink(curve.getPointAt(u), sinkAt(distToEnd));
       const tangent = curve.getTangentAt(u);
       const radial = p.clone().normalize();
       const major = new THREE.Vector3().crossVectors(tangent, radial);
@@ -100,8 +115,8 @@ export function buildStarTube(star, tubeRadius, options = {}) {
   }
 
   const cuts = TIP_PARAMS.map((tp) => ({
-    asc: curve.getPointAt((tp - cutWindow + 1) % 1),
-    desc: curve.getPointAt((tp + cutWindow) % 1),
+    asc: applySink(curve.getPointAt((tp - cutWindow + 1) % 1), junctionSink),
+    desc: applySink(curve.getPointAt((tp + cutWindow) % 1), junctionSink),
   }));
 
   const geometry = new THREE.BufferGeometry();

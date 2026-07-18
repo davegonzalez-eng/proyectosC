@@ -36,6 +36,7 @@ function smoothstep(edge0, edge1, x) {
  * @param {number} [options.textureWorldSize=0.12] world-space size of one texture tile along the ribbon's length
  * @param {number} [options.thickness=0.012] slab thickness (world units) through the ribbon's middle
  * @param {number} [options.endThickness=0.0072] slab thickness right at each end, matching the tube's flattened cut-edge thickness (2 x its minor axis)
+ * @param {number} [options.junctionSink=0] radial pull (world units, toward the sphere center) applied to the tip endpoints, matching the tube's sunk cut edges
  * @param {THREE.Vector3|null} [options.entryA=null] tube cut-edge point on arm A the spline should start from (falls back to starting at the tip)
  * @param {THREE.Vector3|null} [options.entryB=null] tube cut-edge point on arm B the spline should end at
  * @returns {{geometry: THREE.BufferGeometry, curve: THREE.CatmullRomCurve3}}
@@ -51,12 +52,18 @@ export function buildRibbon(tipA, tipB, options = {}) {
     textureWorldSize = 0.12,
     thickness = 0.012,
     endThickness = 0.0072,
+    junctionSink = 0,
     entryA = null,
     entryB = null,
   } = options;
 
-  const pA = tipA.position;
-  const pB = tipB.position;
+  // Sink the tip points radially by the same amount the tube's cut edges
+  // (and the entry points passed in, which come pre-sunk from
+  // buildStarTube) are sunk, so the whole junction moves inward together.
+  const sink = (p) =>
+    junctionSink ? p.clone().addScaledVector(p.clone().normalize(), -junctionSink) : p;
+  const pA = sink(tipA.position);
+  const pB = sink(tipB.position);
   const span = pA.distanceTo(pB);
   const leaveLen = Math.max(span * leaveFraction, 0.02);
 
