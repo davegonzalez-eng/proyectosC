@@ -180,45 +180,54 @@ touching it), which buys two precise guarantees:
 - **Exact dip depth.** The middle "dip" point is placed at a precise target
   radius from the sculpture's center: `depthFraction × avgRadius`, where
   `avgRadius` is the average of the two tips' own distance from center.
-  Default `depthFraction = 0.81` — the ribbon's lowest point sits at 81% of
-  the face's radius. (Verified numerically: min/max depth ratio across all
-  60 connections exactly matches the configured fraction.) Tunable via the
-  **Ribbon depth** slider (50–100%).
+  Default `depthFraction = 0.93` — the ribbon's lowest point sits at 93% of
+  the face's radius, staying just under the surface. (Verified numerically:
+  min/max depth ratio across all 60 connections exactly matches the
+  configured fraction.) Tunable via the **Ribbon depth** slider (50–100%).
 
 The cross-section also blends smoothly: its half-width starts at
-`tubeRadius` (matching the star tube's own thickness) right at each tip and
+`tubeRadius` (matching the tube's flattened cut edge, below) at each end and
 widens to the full ribbon width only in the middle, so there's no jump in
-apparent thickness at the join — no more thin thread poking out of a fat
-tube. A twisted flat strip is then built along the curve using Frenet frames
-plus a continuously increasing twist angle (**Ribbon twist** slider, in full
-turns; default **0.5**, a single half-turn — kept low so the strip doesn't
-fight itself visually across many simultaneous ribbons).
+apparent thickness at the join. A twisted flat strip is then built along the
+curve using Frenet frames plus a continuously increasing twist angle
+(**Ribbon twist** slider, in full turns; default **0.5**, a single
+half-turn — kept low so the strip doesn't fight itself visually across many
+simultaneous ribbons).
 
-### 7b. Flattening the star tube into its ribbon (no more rounded cap)
+### 7b. Fusing the tube into the ribbon (the arm's end IS the ribbon)
 
-Even with the tangent and width matched at the join (above), the star's own
-tube kept a constant *circular* cross-section all the way to the tip, while
-the ribbon starts as a *flat* sliver of the same half-width - a shape
-mismatch that read as a small rounded cap right where the ribbon should
-begin. `src/startube.js:buildStarTube()` replaces the plain
-`THREE.TubeGeometry` (which can't vary its cross-section) with a
-custom-built tube whose cross-section is circular through the middle of
-each arm/inner-point stretch and tapers to a flat, `tubeRadius`-wide sliver
-right at each tip:
+Matching tangent and width at a shared tip point still left two separate
+objects meeting there — a finished tube end with a ribbon laid against it.
+The current design removes the seam by removing the overlap entirely:
 
-```
-minorAxis(t) = lerp(tubeRadius, tubeRadius · 0.12, tipFlatness(t))
-majorAxis(t) = tubeRadius                              // constant - this is the "width" that carries over into the ribbon
-```
+- **The tube stops short of every tip.** `src/startube.js:buildStarTube()`
+  cuts the outline tube in a parameter window (default ±0.04 of the
+  perimeter) around each of the 5 tip points, leaving 5 open segments per
+  star (the inner-point stretches). Each segment's cross-section is
+  circular through its middle and tapers to a flat, `tubeRadius`-wide
+  sliver exactly at its cut ends — never fully collapsing (minor axis
+  floors at 12% of `tubeRadius`) so normals stay clean. The flat side is
+  oriented along `cross(pathTangent, sphereRadial)`: the surface-tangent
+  direction, i.e. the sliver lies flat against the sculpture's shell.
+- **The ribbons take over the removed stretch.** `buildStarTube()` returns
+  the two cut-edge center points per tip (`asc`, approached from the
+  previous inner point, and `desc`, toward the next). Every arm is touched
+  by exactly two ribbons — once as the source (`a`) of its own face's rule
+  and once as the landing (`b`) of a neighbor's — so the source ribbon's
+  spline is threaded through the `asc` cut point and the landing ribbon's
+  through `desc`. Each ribbon then passes through the tip itself before
+  heading off to the other face: together, the two ribbons reconstruct the
+  entire removed tip stretch as ribbon surface. The arm doesn't end and
+  hand off to a ribbon; it *becomes* two ribbons.
+- **Flat sides agree at the joins.** The ribbon solves for a twist-angle
+  correction so its flat (width) direction lands on the same
+  `cross(tangent, radial)` surface-tangent direction at both of its ends —
+  the exact orientation the tube's cut edges are flattened in — with the
+  user's twist plus that correction interpolated along the length.
 
-`tipFlatness(t)` ramps in over the last 5% of curve-parameter distance to
-each of the 5 tip points (mirroring the ribbon's own tapering zone), using
-the tube's own Frenet frame (normal = major/width axis, binormal =
-minor/thickness axis that shrinks). The minor axis never fully collapses to
-zero, which would produce degenerate normals right at the tip - it shrinks
-to 12% of `tubeRadius` instead, reading as flat without a shading glitch.
-(Verified numerically: cross-section at a tip has minor/major axis ratio of
-exactly 0.12, vs. a perfect circle - ratio 1.0 - one full arm-length away.)
+Verified numerically across all 60 connections: the ribbon spline's start
+and end coincide with the tube's cut-edge centers to 0.0 deviation, and the
+ribbon's end half-width equals `tubeRadius` exactly.
 
 ### 8. Specifying connections
 
@@ -339,7 +348,7 @@ persistence across reloads.
 index.html            page shell, collapsible control panel, import map
 src/geometry.js        dodecahedron construction, per-face star math, adjacency-connection rule
 src/ribbon.js          spline-based ribbon geometry (precise dip depth + tangent-matched joins) between two arm tips
-src/startube.js         variable-cross-section star tube (round mid-arm, flattens to ribbon width at each tip)
+src/startube.js         star tube cut short of every tip (5 open segments, flat cut edges the ribbons fuse into)
 src/membrane.js         thin triangulated fill surface for a star's interior
 src/hexgrid.js           clipped hexagonal-grid fill surface for a star's interior
 src/hextexture.js        procedural tileable hex-pattern canvas texture, applied as a bump map on ribbons
@@ -366,18 +375,21 @@ vendor/three/           vendored Three.js build + OrbitControls + CSS2DRenderer 
   point on a star's own outline gives a max distance of `0.00000000` -
   exact, not approximate (this is what the `rFinal`-instead-of-`r2` change
   in §6b buys).
-- `buildStarTube()` checked standalone under Node: 1600 vertices / 9600
-  indices for the default 200×8 resolution, no NaNs, and the cross-section
-  at a tip parameter has minor/major axis ratio 0.12 vs. 1.0 (a full circle)
-  one arm-length away - the taper is real, not cosmetic.
+- The tube/ribbon fusion checked standalone under Node across all 60
+  connections: every arm appears exactly once as a source and once as a
+  landing (so both cut ends of every tip are claimed by exactly one
+  ribbon), the ribbon spline's first and last points coincide with the
+  tube's cut-edge centers to 0.00000000 deviation, the ribbon's end
+  half-width equals `tubeRadius` exactly, and neither tube nor ribbon
+  geometry contains a single NaN.
 - Star outline triangulation (`buildMembrane`) and hex-grid clipping
   (`buildHexGrid`) checked standalone: expected triangle counts, no NaNs.
 - Full app checked in headless Chromium: renders with zero console errors
   against every default in this pass; the collapse chevron hides/shows the
   panel; the hex bump texture is visible on ribbon surfaces at close range
-  and reads at the same scale as the star's own hex-grid fill; the round
-  tube visibly narrows into flat ribbon width approaching each tip instead
-  of ending in a rounded cap.
+  and reads at the same scale as the star's own hex-grid fill; zoomed
+  inspection shows the tube narrowing, flattening, and continuing as the
+  ribbon with no cap, stub, or seam at any of the 60 joins.
 
 ## Possible next steps
 

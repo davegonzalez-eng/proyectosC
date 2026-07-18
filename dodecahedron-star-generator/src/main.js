@@ -26,7 +26,7 @@ const params = {
   tubeRadius: 0.03,
   twistTurns: 0.5,
   ribbonHalfWidth: 0.09,
-  ribbonDepthFraction: 0.81,
+  ribbonDepthFraction: 0.93,
   showFaceLabels: false,
   showArmLabels: false,
   showMembrane: false,
@@ -49,6 +49,8 @@ const adjacentPairs = computeAdjacentFaceConnections(faces);
 
 /** @type {Map<string, {position: THREE.Vector3, outDir: THREE.Vector3, label: string}>} */
 let tipsByLabel = new Map();
+/** @type {Map<string, {asc: THREE.Vector3, desc: THREE.Vector3}>} tube cut-edge points per arm, for ribbon fusion */
+let cutsByLabel = new Map();
 let connections = []; // [{a: 'F0-A2', b: 'F5-A1'}] from the text box
 let pendingPick = null;
 
@@ -151,11 +153,12 @@ function rebuildStars() {
   labelsGroup.clear();
   markersGroup.clear();
   tipsByLabel = new Map();
+  cutsByLabel = new Map();
 
   for (const face of faces) {
     const star = buildStar(face, params);
 
-    const tubeGeom = buildStarTube(star, params.tubeRadius);
+    const { geometry: tubeGeom, cuts } = buildStarTube(star, params.tubeRadius);
     starsGroup.add(new THREE.Mesh(tubeGeom, sculptureMaterial));
 
     if (params.showHexGrid) {
@@ -178,6 +181,7 @@ function rebuildStars() {
 
     for (const tip of star.tips) {
       tipsByLabel.set(tip.label, tip);
+      cutsByLabel.set(tip.label, cuts[tip.armIndex]);
 
       const marker = new THREE.Mesh(new THREE.SphereGeometry(params.tubeRadius * 1.9, 12, 12), markerMaterial);
       marker.position.copy(tip.position);
@@ -228,12 +232,19 @@ function rebuildRibbons() {
     const tipA = tipsByLabel.get(a);
     const tipB = tipsByLabel.get(b);
     if (!tipA || !tipB) continue;
+    // Fuse each ribbon end into the star tube: every arm appears exactly
+    // once as the "a" (source) side and once as the "b" (landing) side of
+    // the adjacency set, so the source ribbon takes over the tube's
+    // ascending cut end and the landing ribbon its descending cut end -
+    // together the two ribbons replace the entire removed tip stretch.
     const { geometry } = buildRibbon(tipA, tipB, {
       halfWidth: params.ribbonHalfWidth,
       tubeRadius: params.tubeRadius,
       twistTurns: params.twistTurns,
       depthFraction: params.ribbonDepthFraction,
       textureWorldSize,
+      entryA: cutsByLabel.get(a)?.asc ?? null,
+      entryB: cutsByLabel.get(b)?.desc ?? null,
     });
     ribbonsGroup.add(new THREE.Mesh(geometry, ribbonMaterial));
   }

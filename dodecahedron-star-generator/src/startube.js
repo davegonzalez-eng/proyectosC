@@ -1,26 +1,27 @@
-// Builds a star's outline as a tube with a *variable* cross-section instead
-// of THREE.TubeGeometry's constant circle: round through the middle of each
-// arm/inner-point stretch, tapering to a flat, ribbon-width sliver right at
-// each tip. Every arm connects to a ribbon (§9 of the README), and the
-// ribbon's own cross-section starts at exactly `tubeRadius` wide - so
-// without this, the round tube meets the flat ribbon with a visible
-// mismatch (a "cap" bump) right at the join. Flattening the tube itself
-// removes that seam: the arm preserves its width and slope on the way into
-// the ribbon instead of ending in a rounded cap that the ribbon then starts
-// over from.
+// Builds a star's outline as a tube that deliberately STOPS SHORT of each
+// tip: the tube is cut in a parameter window around all 5 tip points,
+// leaving 5 open segments (inner-point stretches), each tapering from a
+// round cross-section in its middle to a flat, ribbon-width sliver right at
+// its cut ends. The removed stretch - cut point, through the tip, to the
+// other cut point - is not rendered by the tube at all: the two ribbons
+// that touch this arm (every arm is touched by exactly two, see the
+// adjacency rule in geometry.js) each take over one half of it, their
+// splines threaded through the exact cut positions returned in `cuts`. So
+// the arm's end IS the ribbon, not a tube with a ribbon glued on.
+//
+// Cross-section orientation: the major (width) axis is the surface-tangent
+// direction perpendicular to the path - cross(pathTangent, sphereRadial) -
+// the same direction the ribbon aligns its own flat side to at its ends, so
+// tube and ribbon are flattened in the same plane where they meet.
 
 import * as THREE from 'three';
 
-// Tip control points sit at these parameters on the closed 10-point curve
-// (5 tips + 5 inner points, evenly spaced): tip i is at i / 5.
+// Tip control points sit at these arc-length parameters on the closed
+// 10-point outline curve (5 tips + 5 inner points; the pentagram's 10 edges
+// are congruent by symmetry, so equal arc spacing).
 const TIP_PARAMS = [0, 0.2, 0.4, 0.6, 0.8];
-// How far (in curve parameter, 0-1) the taper reaches out from each tip.
-// 0.05 is half the 0.1 gap to the neighboring inner point, so the taper
-// stays local to each arm's own final stretch.
-const TAPER_PARAM = 0.05;
-// The cross-section's minor axis never fully collapses to zero (which would
-// produce degenerate normals right at the tip) - it shrinks to this
-// fraction of tubeRadius instead, reading as flat without being degenerate.
+// The cross-section's minor axis never fully collapses to zero (degenerate
+// normals) - it shrinks to this fraction of tubeRadius, reading as flat.
 const FLAT_MINOR_FRACTION = 0.12;
 
 function smoothstep(edge0, edge1, x) {
@@ -28,68 +29,84 @@ function smoothstep(edge0, edge1, x) {
   return t * t * (3 - 2 * t);
 }
 
-function tipFlatness(t) {
-  let minDt = Infinity;
-  for (const tip of TIP_PARAMS) {
-    const raw = Math.abs(t - tip);
-    minDt = Math.min(minDt, raw, 1 - raw);
-  }
-  return 1 - smoothstep(0, TAPER_PARAM, minDt);
-}
-
 /**
  * @param {{outline: THREE.Vector3[]}} star
  * @param {number} tubeRadius
  * @param {object} [options]
- * @param {number} [options.tubularSegments=200]
+ * @param {number} [options.tubularSegments=200] ring density for the whole (uncut) perimeter
  * @param {number} [options.radialSegments=8]
- * @returns {THREE.BufferGeometry}
+ * @param {number} [options.cutWindow=0.04] half-size (in arc-length parameter, 0-1) of the removed window centered on each tip
+ * @param {number} [options.taper=0.035] parameter distance over which each segment flattens toward its cut ends
+ * @returns {{geometry: THREE.BufferGeometry, cuts: Array<{asc: THREE.Vector3, desc: THREE.Vector3}>}}
+ *   cuts[k] holds the two cut-edge centers for tip/arm k: `asc` on the side
+ *   approached from the previous inner point, `desc` on the side toward the
+ *   next inner point.
  */
 export function buildStarTube(star, tubeRadius, options = {}) {
-  const { tubularSegments = 200, radialSegments = 8 } = options;
-  const N = tubularSegments;
+  const {
+    tubularSegments = 200,
+    radialSegments = 8,
+    cutWindow = 0.04,
+    taper = 0.035,
+  } = options;
 
   const curve = new THREE.CatmullRomCurve3(star.outline, true, 'catmullrom', 0.5);
-  const frames = curve.computeFrenetFrames(N, true);
-  const points = curve.getSpacedPoints(N);
 
-  const positions = new Float32Array(N * radialSegments * 3);
-  const ringStart = new Array(N);
-
-  for (let i = 0; i < N; i++) {
-    const t = i / N;
-    const minorScale = THREE.MathUtils.lerp(1, FLAT_MINOR_FRACTION, tipFlatness(t));
-    const center = points[i];
-    const normal = frames.normals[i];
-    const binormal = frames.binormals[i];
-
-    ringStart[i] = i * radialSegments;
-    for (let j = 0; j < radialSegments; j++) {
-      const angle = (2 * Math.PI * j) / radialSegments;
-      const x = Math.cos(angle) * tubeRadius;
-      const y = Math.sin(angle) * tubeRadius * minorScale;
-      const base = (ringStart[i] + j) * 3;
-      positions[base + 0] = center.x + normal.x * x + binormal.x * y;
-      positions[base + 1] = center.y + normal.y * x + binormal.y * y;
-      positions[base + 2] = center.z + normal.z * x + binormal.z * y;
-    }
-  }
-
+  const positions = [];
   const indices = [];
-  for (let i = 0; i < N; i++) {
-    const iNext = (i + 1) % N;
-    const a0 = ringStart[i];
-    const a1 = ringStart[iNext];
-    for (let j = 0; j < radialSegments; j++) {
-      const jNext = (j + 1) % radialSegments;
-      const v00 = a0 + j, v01 = a0 + jNext, v10 = a1 + j, v11 = a1 + jNext;
-      indices.push(v00, v10, v01, v01, v10, v11);
+  let ringBase = 0;
+
+  for (let k = 0; k < TIP_PARAMS.length; k++) {
+    const u0 = TIP_PARAMS[k] + cutWindow;
+    const u1 = (k === TIP_PARAMS.length - 1 ? 1 : TIP_PARAMS[k + 1]) - cutWindow;
+    const span = u1 - u0;
+    const rings = Math.max(Math.ceil(span * tubularSegments), 8);
+
+    for (let i = 0; i <= rings; i++) {
+      const u = u0 + (span * i) / rings;
+      const distToEnd = Math.min(u - u0, u1 - u);
+      const minorScale = THREE.MathUtils.lerp(FLAT_MINOR_FRACTION, 1, smoothstep(0, taper, distToEnd));
+
+      const p = curve.getPointAt(u);
+      const tangent = curve.getTangentAt(u);
+      const radial = p.clone().normalize();
+      const major = new THREE.Vector3().crossVectors(tangent, radial);
+      if (major.lengthSq() < 1e-10) major.set(1, 0, 0); // path never runs radially in practice
+      major.normalize();
+      const minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
+
+      for (let j = 0; j < radialSegments; j++) {
+        const angle = (2 * Math.PI * j) / radialSegments;
+        const x = Math.cos(angle) * tubeRadius;
+        const y = Math.sin(angle) * tubeRadius * minorScale;
+        positions.push(
+          p.x + major.x * x + minor.x * y,
+          p.y + major.y * x + minor.y * y,
+          p.z + major.z * x + minor.z * y
+        );
+      }
     }
+
+    for (let i = 0; i < rings; i++) {
+      const a0 = ringBase + i * radialSegments;
+      const a1 = ringBase + (i + 1) * radialSegments;
+      for (let j = 0; j < radialSegments; j++) {
+        const jNext = (j + 1) % radialSegments;
+        const v00 = a0 + j, v01 = a0 + jNext, v10 = a1 + j, v11 = a1 + jNext;
+        indices.push(v00, v10, v01, v01, v10, v11);
+      }
+    }
+    ringBase += (rings + 1) * radialSegments;
   }
+
+  const cuts = TIP_PARAMS.map((tp) => ({
+    asc: curve.getPointAt((tp - cutWindow + 1) % 1),
+    desc: curve.getPointAt((tp + cutWindow) % 1),
+  }));
 
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
-  return geometry;
+  return { geometry, cuts };
 }
