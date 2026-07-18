@@ -107,18 +107,23 @@ export function hexGridEdges(polygon, cellSize) {
 /**
  * Build a merged strut-lattice BufferGeometry for one face's star, mapping
  * the clipped hex-grid edges back into world space through the same
- * (U, W, N) frame + radial bulge profile the star outline uses.
+ * (U, W, N) frame + radial bulge profile the star outline uses. When
+ * `thickness` > 0 each strut is extruded into a box (top, bottom, and two
+ * side walls, each with its own vertices so edges stay crisp) so the fill
+ * reads as a real perforated sheet with visible edge thickness rather than
+ * a zero-thickness film.
  *
  * @param {Face} face
  * @param {{outline2D: {u:number,w:number}[]}} star
- * @param {object} params bulgeStrength, tipDipStrength, plus cellSize/strutWidth overrides
+ * @param {object} params bulgeStrength, tipDipStrength, thickness, plus cellSize/strutWidth overrides
  * @returns {THREE.BufferGeometry}
  */
 export function buildHexGrid(face, star, params) {
-  const { cellFraction = 0.22, strutWidth = 0.015, bulgeStrength = 0, tipDipStrength = 0 } = params;
+  const { cellFraction = 0.22, strutWidth = 0.015, bulgeStrength = 0, tipDipStrength = 0, thickness = 0 } = params;
   const cellSize = face.R_out * cellFraction;
   const polygon = star.outline2D.map((p) => ({ x: p.u, y: p.w }));
   const edges = hexGridEdges(polygon, cellSize);
+  const halfT = thickness / 2;
 
   const place = (u, w) => {
     const r2 = Math.sqrt(u * u + w * w);
@@ -130,6 +135,12 @@ export function buildHexGrid(face, star, params) {
   const positions = [];
   const indices = [];
   let vi = 0;
+
+  const pushQuad = (q1, q2, q3, q4) => {
+    positions.push(q1.x, q1.y, q1.z, q2.x, q2.y, q2.z, q3.x, q3.y, q3.z, q4.x, q4.y, q4.z);
+    indices.push(vi, vi + 2, vi + 1, vi + 1, vi + 2, vi + 3);
+    vi += 4;
+  };
 
   for (const [p1, p2] of edges) {
     const a = place(p1.x, p1.y);
@@ -144,9 +155,17 @@ export function buildHexGrid(face, star, params) {
     const p2a = b.clone().add(perp);
     const p2b = b.clone().sub(perp);
 
-    positions.push(p1a.x, p1a.y, p1a.z, p1b.x, p1b.y, p1b.z, p2a.x, p2a.y, p2a.z, p2b.x, p2b.y, p2b.z);
-    indices.push(vi, vi + 2, vi + 1, vi + 1, vi + 2, vi + 3);
-    vi += 4;
+    if (halfT > 0) {
+      // Local sheet normal for the extrusion: perpendicular to both the
+      // strut direction and its in-sheet width direction.
+      const up = new THREE.Vector3().crossVectors(perp, dir).normalize().multiplyScalar(halfT);
+      pushQuad(p1a.clone().add(up), p1b.clone().add(up), p2a.clone().add(up), p2b.clone().add(up));
+      pushQuad(p1b.clone().sub(up), p1a.clone().sub(up), p2b.clone().sub(up), p2a.clone().sub(up));
+      pushQuad(p1a.clone().sub(up), p1a.clone().add(up), p2a.clone().sub(up), p2a.clone().add(up));
+      pushQuad(p1b.clone().add(up), p1b.clone().sub(up), p2b.clone().add(up), p2b.clone().sub(up));
+    } else {
+      pushQuad(p1a, p1b, p2a, p2b);
+    }
   }
 
   const geometry = new THREE.BufferGeometry();

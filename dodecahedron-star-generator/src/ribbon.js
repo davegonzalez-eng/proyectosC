@@ -34,6 +34,8 @@ function smoothstep(edge0, edge1, x) {
  * @param {number} [options.leaveFraction=0.22] how far (as a fraction of tip-to-tip distance) the curve travels along each tip's own tangent before the dip
  * @param {number} [options.depthFraction=0.9] target radius at the dip point, as a fraction of the endpoints' average distance from the sphere center
  * @param {number} [options.textureWorldSize=0.12] world-space size of one texture tile along the ribbon's length
+ * @param {number} [options.thickness=0.012] slab thickness (world units) through the ribbon's middle
+ * @param {number} [options.endThickness=0.0072] slab thickness right at each end, matching the tube's flattened cut-edge thickness (2 x its minor axis)
  * @param {THREE.Vector3|null} [options.entryA=null] tube cut-edge point on arm A the spline should start from (falls back to starting at the tip)
  * @param {THREE.Vector3|null} [options.entryB=null] tube cut-edge point on arm B the spline should end at
  * @returns {{geometry: THREE.BufferGeometry, curve: THREE.CatmullRomCurve3}}
@@ -47,6 +49,8 @@ export function buildRibbon(tipA, tipB, options = {}) {
     leaveFraction = 0.22,
     depthFraction = 0.9,
     textureWorldSize = 0.12,
+    thickness = 0.012,
+    endThickness = 0.0072,
     entryA = null,
     entryB = null,
   } = options;
@@ -92,10 +96,13 @@ export function buildRibbon(tipA, tipB, options = {}) {
   let delta = angleEnd - (angleStart + twistTurns * Math.PI * 2);
   delta = ((delta % Math.PI) + Math.PI * 1.5) % Math.PI - Math.PI / 2;
 
-  const positions = new Float32Array((segments + 1) * 2 * 3);
-  const uvs = new Float32Array((segments + 1) * 2 * 2);
-  const indices = new Uint32Array(segments * 6);
-
+  // Precompute per-station data, then extrude the strip into a slab with
+  // real thickness: a top face, a bottom face, and two side walls (each
+  // built as its own vertex strip so the 90-degree edges stay crisp). The
+  // thickness tapers at both ends down to `endThickness` - the tube's own
+  // flattened cut-edge thickness - so the slab butts against the tube cut
+  // with matching width AND matching thickness.
+  const stations = [];
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
     const normal = frames.normals[i];
@@ -104,24 +111,13 @@ export function buildRibbon(tipA, tipB, options = {}) {
     const twistAngle = angleStart + (twistTurns * Math.PI * 2 + delta) * t;
     const ribbonDir = normal.clone().multiplyScalar(Math.cos(twistAngle))
       .addScaledVector(binormal, Math.sin(twistAngle));
+    const upDir = new THREE.Vector3().crossVectors(frames.tangents[i], ribbonDir).normalize();
 
-    // Blend the cross-section from the tube's cut-edge width at each end up
-    // to the full ribbon width in the middle.
-    const width = THREE.MathUtils.lerp(
-      tubeRadius,
-      halfWidth,
-      smoothstep(0, 0.3, t) * smoothstep(1, 0.7, t)
-    );
-
-    const edgeA = points[i].clone().addScaledVector(ribbonDir, width);
-    const edgeB = points[i].clone().addScaledVector(ribbonDir, -width);
-
-    positions[i * 6 + 0] = edgeA.x;
-    positions[i * 6 + 1] = edgeA.y;
-    positions[i * 6 + 2] = edgeA.z;
-    positions[i * 6 + 3] = edgeB.x;
-    positions[i * 6 + 4] = edgeB.y;
-    positions[i * 6 + 5] = edgeB.z;
+    // Blend the cross-section from the tube's cut-edge dimensions at each
+    // end up to the full ribbon width/thickness in the middle.
+    const blend = smoothstep(0, 0.3, t) * smoothstep(1, 0.7, t);
+    const width = THREE.MathUtils.lerp(tubeRadius, halfWidth, blend);
+    const halfT = THREE.MathUtils.lerp(endThickness, thickness, blend) / 2;
 
     // Both UV axes are mapped in *world units* at the same scale: one tile
     // spans textureWorldSize along the length, and (the hex tile being
@@ -131,30 +127,53 @@ export function buildRibbon(tipA, tipB, options = {}) {
     // ribbon's varying width. RepeatWrapping handles the fractional span.
     const uvU = t * uRepeat;
     const uvVHalf = width / (textureWorldSize * Math.sqrt(3));
-    uvs[i * 4 + 0] = uvU;
-    uvs[i * 4 + 1] = 0.5 + uvVHalf;
-    uvs[i * 4 + 2] = uvU;
-    uvs[i * 4 + 3] = 0.5 - uvVHalf;
 
-    if (i < segments) {
-      const a = i * 2;
-      const b = i * 2 + 1;
-      const c = (i + 1) * 2;
-      const d = (i + 1) * 2 + 1;
-      const base = i * 6;
-      indices[base + 0] = a;
-      indices[base + 1] = c;
-      indices[base + 2] = b;
-      indices[base + 3] = b;
-      indices[base + 4] = c;
-      indices[base + 5] = d;
-    }
+    const center = points[i];
+    const wOff = ribbonDir.clone().multiplyScalar(width);
+    const tOff = upDir.multiplyScalar(halfT);
+    stations.push({
+      topA: center.clone().add(wOff).add(tOff),
+      topB: center.clone().sub(wOff).add(tOff),
+      botA: center.clone().add(wOff).sub(tOff),
+      botB: center.clone().sub(wOff).sub(tOff),
+      uvU,
+      uvVHalf,
+    });
   }
 
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+
+  // Each strip: 2 verts per station, quads between consecutive stations.
+  const addStrip = (vertPair, uvPair) => {
+    const base = positions.length / 3;
+    for (let i = 0; i <= segments; i++) {
+      const s = stations[i];
+      const [va, vb] = vertPair(s);
+      positions.push(va.x, va.y, va.z, vb.x, vb.y, vb.z);
+      const [uva, uvb] = uvPair(s);
+      uvs.push(uva[0], uva[1], uvb[0], uvb[1]);
+    }
+    for (let i = 0; i < segments; i++) {
+      const a = base + i * 2;
+      const b = a + 1;
+      const c = base + (i + 1) * 2;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  };
+
+  const sideBandV = (s) => Math.max(s.uvVHalf * 0.1, 0.01);
+  addStrip((s) => [s.topA, s.topB], (s) => [[s.uvU, 0.5 + s.uvVHalf], [s.uvU, 0.5 - s.uvVHalf]]);
+  addStrip((s) => [s.botB, s.botA], (s) => [[s.uvU, 0.5 - s.uvVHalf], [s.uvU, 0.5 + s.uvVHalf]]);
+  addStrip((s) => [s.topA, s.botA], (s) => [[s.uvU, 0.5], [s.uvU, 0.5 + sideBandV(s)]]);
+  addStrip((s) => [s.botB, s.topB], (s) => [[s.uvU, 0.5], [s.uvU, 0.5 + sideBandV(s)]]);
+
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+  geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
   return { geometry, curve };

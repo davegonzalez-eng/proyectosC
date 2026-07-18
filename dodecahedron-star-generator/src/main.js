@@ -27,6 +27,8 @@ const params = {
   twistTurns: 0.5,
   ribbonHalfWidth: 0.09,
   ribbonDepthFraction: 0.93,
+  ribbonThickness: 0.012,
+  fillThickness: 0.012,
   showFaceLabels: false,
   showArmLabels: false,
   showMembrane: false,
@@ -187,10 +189,11 @@ function rebuildStars() {
         cellFraction: params.hexCellFraction,
         bulgeStrength: params.bulgeStrength,
         tipDipStrength: params.tipDipStrength,
+        thickness: params.fillThickness,
       });
       membraneGroup.add(new THREE.Mesh(hexGeom, sculptureMaterial));
     } else if (params.showMembrane) {
-      const membraneGeom = buildMembrane(star);
+      const membraneGeom = buildMembrane(star, face, params.fillThickness);
       membraneGroup.add(new THREE.Mesh(membraneGeom, sculptureMaterial));
     }
 
@@ -265,6 +268,10 @@ function rebuildRibbons() {
       twistTurns: params.twistTurns,
       depthFraction: params.ribbonDepthFraction,
       textureWorldSize,
+      thickness: params.ribbonThickness,
+      // Match the tube's flattened cut-edge thickness (2 x its minor axis,
+      // which floors at 12% of tubeRadius) so the slab butts flush.
+      endThickness: 2 * 0.12 * params.tubeRadius,
       entryA: cutsByLabel.get(a)?.asc ?? null,
       entryB: cutsByLabel.get(b)?.desc ?? null,
     });
@@ -322,7 +329,9 @@ bindSlider('ribbonDepth', 'ribbonDepthFraction', {
   toParam: (v) => v / 100,
   format: (v) => `${Math.round(v * 100)}%`,
 });
-bindSlider('hexCell', 'hexCellFraction', { format: (v) => v.toFixed(2) });
+bindSlider('ribbonThick', 'ribbonThickness', { format: (v) => v.toFixed(3) });
+bindSlider('fillThick', 'fillThickness', { format: (v) => v.toFixed(3) });
+bindSlider('hexCell', 'hexCellFraction', { format: (v) => v.toFixed(3) });
 
 document.getElementById('wave-enabled').addEventListener('change', (e) => {
   params.waveEnabled = e.target.checked;

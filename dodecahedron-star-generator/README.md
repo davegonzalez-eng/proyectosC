@@ -188,11 +188,16 @@ touching it), which buys two precise guarantees:
 The cross-section also blends smoothly: its half-width starts at
 `tubeRadius` (matching the tube's flattened cut edge, below) at each end and
 widens to the full ribbon width only in the middle, so there's no jump in
-apparent thickness at the join. A twisted flat strip is then built along the
-curve using Frenet frames plus a continuously increasing twist angle
-(**Ribbon twist** slider, in full turns; default **0.5**, a single
-half-turn — kept low so the strip doesn't fight itself visually across many
-simultaneous ribbons).
+apparent size at the join. The strip is a twisted *slab* with real physical
+thickness, not a zero-thickness film: a top face, bottom face, and two side
+walls (each its own vertex strip, keeping the 90° edges crisp), built along
+the curve using Frenet frames plus a continuously increasing twist angle
+(**Ribbon twist** slider, in full turns; default **0.5**). Thickness is set
+by the **Ribbon thick** slider (default **0.012** world units, equal to the
+fill's default so both read as the same sheet stock) and tapers at both
+ends down to the tube's own flattened cut-edge thickness (2 × 12% of
+`tubeRadius`), so the slab butts against the tube cut with matching width
+*and* matching thickness.
 
 ### 7b. Fusing the tube into the ribbon (the arm's end IS the ribbon)
 
@@ -291,20 +296,26 @@ Two mutually-exclusive checkboxes (checking one unchecks the other):
 
 - **Fill star interior (thin surface)** triangulates each star's 10-point
   outline (`THREE.ShapeUtils.triangulateShape` on the same local 2D `(u, w)`
-  coordinates used to place the outline, via `src/membrane.js`) into a thin
-  double-sided panel.
+  coordinates used to place the outline, via `src/membrane.js`) into a
+  panel; with thickness it becomes two parallel layers offset along the
+  face normal (the edge gap between them hides inside the tube, so no side
+  wall is needed).
 - **Fill star interior (hex grid)** (`src/hexgrid.js`) tiles a pointy-top
   hexagonal grid across the same local 2D coordinates, clips each hex edge
   against the star's (concave) outline using a generic segment/polygon
   clip - not just an inside/outside test, so partial cells along the
   boundary are cut cleanly rather than dropped or left overhanging - and
-  turns every surviving strut into a thin quad in 3D via the shared
-  `applyTipDip()` (§6b) plus the same bulge formula, so it follows the
-  star's *actual* surface, not an approximation of it. Cell size is tunable
-  via the **Hex cell size** slider (default 0.02 - a fine lattice).
+  extrudes every surviving strut into a thin box (top, bottom, two side
+  walls) via the shared `applyTipDip()` (§6b) plus the same bulge formula,
+  so it follows the star's *actual* surface with real edge thickness. Cell
+  size is tunable via the **Hex cell size** slider (default 0.02, stepping
+  in fine 0.005 increments down to 0.01).
 
-The solid membrane is trivially exact (it's built entirely from the star's
-own already-computed outline points, no new ones). The hex grid needed more
+Both fills take their slab thickness from the **Fill thick** slider
+(default **0.012** world units — deliberately equal to the ribbons'
+default, so fills and ribbons read as the same sheet stock). The solid
+membrane is trivially exact (it's built entirely from the star's own
+already-computed outline points, no new ones). The hex grid needed more
 care since it generates brand-new interior points directly in `(u, w)`
 space with no original `r2` to place them from - see the `rFinal` note in
 §6b for how that's kept exact rather than approximate.
@@ -399,12 +410,18 @@ vendor/three/           vendored Three.js build + OrbitControls + CSS2DRenderer 
   geometry contains a single NaN.
 - Star outline triangulation (`buildMembrane`) and hex-grid clipping
   (`buildHexGrid`) checked standalone: expected triangle counts, no NaNs.
+- Slab thickness checked standalone under Node: the ribbon measures exactly
+  `0.0072` thick at its ends (= 2 × 12% of the 0.03 tube radius, the tube's
+  flattened cut-edge thickness) and exactly `0.0120` through its middle
+  (the default slider value); extruded hex-grid struts measure exactly
+  `0.0120`; the membrane produces the expected 2 × 10 layered vertices.
 - Full app checked in headless Chromium: renders with zero console errors
   against every default in this pass; the collapse chevron hides/shows the
   panel; the hex bump texture is visible on ribbon surfaces at close range
   and reads at the same scale as the star's own hex-grid fill; zoomed
   inspection shows the tube narrowing, flattening, and continuing as the
-  ribbon with no cap, stub, or seam at any of the 60 joins.
+  ribbon with no cap, stub, or seam, and the ribbons showing real slab
+  edges that visibly thicken when the Ribbon thick slider is raised.
 
 ## Possible next steps
 
