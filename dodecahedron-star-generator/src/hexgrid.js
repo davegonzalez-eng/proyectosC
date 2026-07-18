@@ -16,6 +16,11 @@ export function hash2(x, y) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
+function smoothstep(edge0, edge1, x) {
+  const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1);
+  return t * t * (3 - 2 * t);
+}
+
 function pointInPolygon(pt, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -146,17 +151,44 @@ export function hexGridEdges(polygon, cellSize, jitter = 0) {
  * @returns {THREE.BufferGeometry}
  */
 export function buildHexGrid(face, star, params) {
-  const { cellFraction = 0.22, strutWidth = 0.015, bulgeStrength = 0, tipDipStrength = 0, thickness = 0, jitter = 0 } = params;
+  const {
+    cellFraction = 0.22,
+    strutWidth = 0.015,
+    bulgeStrength = 0,
+    tipDipStrength = 0,
+    thickness = 0,
+    jitter = 0,
+    junctionSink = 0,
+    sinkNear = 0,
+    sinkFar = 0,
+  } = params;
   const cellSize = face.R_out * cellFraction;
   const polygon = star.outline2D.map((p) => ({ x: p.u, y: p.w }));
   const edges = hexGridEdges(polygon, cellSize, jitter);
   const halfT = thickness / 2;
 
+  // Star tips sit at the even indices of the 10-point outline. Fill points
+  // near a tip sink radially with the tube's own falloff (full inside
+  // sinkNear of a tip, zero beyond sinkFar - both world distances derived
+  // from the tube's parameter-space profile), so the fill sheet dips into
+  // the sculpture together with the tube ends and ribbon endpoints instead
+  // of staying at the surface and hiding them.
+  const tips2D = star.outline2D.filter((_, i) => i % 2 === 0);
+  const sinkAt = (u, w) => {
+    if (!junctionSink) return 0;
+    let d = Infinity;
+    for (const t of tips2D) d = Math.min(d, Math.hypot(u - t.u, w - t.w));
+    return junctionSink * (1 - smoothstep(sinkNear, sinkFar, d));
+  };
+
   const place = (u, w) => {
     const r2 = Math.sqrt(u * u + w * w);
     const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r2 / face.R_out, 2)) : 0;
     const world = face.center.clone().addScaledVector(face.U, u).addScaledVector(face.W, w).addScaledVector(face.normal, bulge);
-    return applyTipDip(world, r2, face, tipDipStrength);
+    applyTipDip(world, r2, face, tipDipStrength);
+    const sink = sinkAt(u, w);
+    if (sink) world.addScaledVector(world.clone().normalize(), -sink);
+    return world;
   };
 
   const positions = [];

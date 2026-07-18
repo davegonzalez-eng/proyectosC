@@ -12,9 +12,10 @@ import * as THREE from 'three';
  * @param {{outline: THREE.Vector3[], outline2D: {u:number, w:number}[]}} star
  * @param {{normal: THREE.Vector3}|null} [face] face whose normal to extrude along (required when thickness > 0)
  * @param {number} [thickness=0] full slab thickness in world units
+ * @param {number} [junctionSink=0] radial pull toward the sphere center applied to the tip vertices (even outline indices), matching the tube/ribbon junction sink
  * @returns {THREE.BufferGeometry}
  */
-export function buildMembrane(star, face = null, thickness = 0) {
+export function buildMembrane(star, face = null, thickness = 0, junctionSink = 0) {
   const contour = star.outline2D.map((p) => new THREE.Vector2(p.u, p.w));
   const triangles = THREE.ShapeUtils.triangulateShape(contour, []);
 
@@ -25,9 +26,14 @@ export function buildMembrane(star, face = null, thickness = 0) {
   layers.forEach((offset, li) => {
     star.outline.forEach((p, i) => {
       const base = (li * n + i) * 3;
-      positions[base + 0] = p.x + (face ? face.normal.x * offset : 0);
-      positions[base + 1] = p.y + (face ? face.normal.y * offset : 0);
-      positions[base + 2] = p.z + (face ? face.normal.z * offset : 0);
+      // Tips (even outline indices) sink with the junction; the panel's
+      // triangles then slope from the sunk tips to the surface-level inner
+      // points, mirroring how the tube and ribbons dip there.
+      const sink = junctionSink && i % 2 === 0 ? junctionSink : 0;
+      const v = sink ? p.clone().addScaledVector(p.clone().normalize(), -sink) : p;
+      positions[base + 0] = v.x + (face ? face.normal.x * offset : 0);
+      positions[base + 1] = v.y + (face ? face.normal.y * offset : 0);
+      positions[base + 2] = v.z + (face ? face.normal.z * offset : 0);
     });
   });
 

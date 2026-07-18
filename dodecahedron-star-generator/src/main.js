@@ -202,7 +202,7 @@ function rebuildStars() {
   for (const face of faces) {
     const star = buildStar(face, params);
 
-    const { geometry: tubeGeom, cuts } = buildStarTube(star, params.tubeRadius, {
+    const { geometry: tubeGeom, cuts, perimeter, sinkNear, sinkFar } = buildStarTube(star, params.tubeRadius, {
       junctionSink: params.junctionSink,
     });
     starsGroup.add(new THREE.Mesh(tubeGeom, sculptureMaterial));
@@ -214,10 +214,15 @@ function rebuildStars() {
         tipDipStrength: params.tipDipStrength,
         thickness: params.fillThickness,
         jitter: params.organicJitter,
+        junctionSink: params.junctionSink,
+        // Convert the tube's parameter-space sink falloff to world distances
+        // so the fill dips around each tip in step with the tube ends.
+        sinkNear: sinkNear * perimeter,
+        sinkFar: sinkFar * perimeter,
       });
       membraneGroup.add(new THREE.Mesh(hexGeom, sculptureMaterial));
     } else if (params.showMembrane) {
-      const membraneGeom = buildMembrane(star, face, params.fillThickness);
+      const membraneGeom = buildMembrane(star, face, params.fillThickness, params.junctionSink);
       membraneGroup.add(new THREE.Mesh(membraneGeom, sculptureMaterial));
     }
 

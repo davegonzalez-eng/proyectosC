@@ -192,9 +192,18 @@ touching it), which buys two precise guarantees:
   fading to zero a short parameter distance into the segment), the
   returned cut points carry the same full-strength sink, and the ribbon
   sinks its tip endpoints identically — so all three stay coincident and
-  the fusion remains watertight at any slider value. (Verified numerically
-  at sink = 0.2: cut radii reduced by exactly 0.2, ribbon endpoints
-  coincide with the sunk cut edges to 0.0 deviation.)
+  the fusion remains watertight at any slider value. Crucially, the
+  interior fills sink too: the cellular grid sinks any point within a
+  tip-proximity falloff matched to the tube's own profile (converted from
+  the tube's arc-length parameters to world distances via its measured
+  perimeter), and the membrane sinks its tip vertices — without this the
+  fill sheet stayed at the surface and simply hid the sunk tubes/ribbons
+  beneath it, making the slider look like a no-op in the default
+  fill-enabled view. (Verified numerically at sink = 0.2–0.25: cut radii
+  reduced by exactly the slider value, ribbon endpoints coincide with the
+  sunk cut edges to 0.0 deviation, ~47% of fill vertices move with max
+  displacement equal to the slider value, and sink = 0 is bit-identical
+  to the unsunk build.)
 
 The cross-section also blends smoothly: its half-width starts at
 `tubeRadius` (matching the tube's flattened cut edge, below) at each end and

@@ -123,5 +123,8 @@ export function buildStarTube(star, tubeRadius, options = {}) {
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
-  return { geometry, cuts };
+  // Perimeter lets callers convert this tube's parameter-space sink profile
+  // (full inside the cut window, fading over sinkSpan) into world distances,
+  // so the interior fills can sink around each tip with a matching falloff.
+  return { geometry, cuts, perimeter: curve.getLength(), sinkNear: cutWindow, sinkFar: cutWindow + sinkSpan };
 }
