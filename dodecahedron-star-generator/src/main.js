@@ -104,13 +104,34 @@ scene.add(fill);
 // the star's own hex-grid fill uses, so a ribbon reads as "the same
 // material, textured" rather than a plain strip next to a textured star.
 const sculptureMaterial = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
-const hexTexture = createHexTexture();
 const ribbonMaterial = new THREE.MeshStandardMaterial({
   side: THREE.DoubleSide,
-  bumpMap: hexTexture,
   bumpScale: 0.006,
-  roughnessMap: hexTexture,
 });
+
+// (Re)generate the ribbon's hex texture so its line thickness matches the
+// 3D hex-grid fill's actual strut-to-cell proportion at the current cell
+// size - the fill's struts have a fixed world width, so at fine cell sizes
+// the fill reads as a perforated sheet with small openings, and the
+// texture's hexes must be drawn with equally thick edges (not thin
+// outlines) or they read as much larger cells even at identical pitch.
+const HEXGRID_STRUT_FULL_WIDTH = 0.03; // 2 x hexgrid.js strutWidth default
+let ribbonTextureCellKey = null;
+function refreshRibbonTexture() {
+  if (params.hexCellFraction === ribbonTextureCellKey) return;
+  ribbonTextureCellKey = params.hexCellFraction;
+  const cellPx = 48;
+  const cellWorld = faces[0].R_out * params.hexCellFraction;
+  const lineWidth = Math.min(
+    (HEXGRID_STRUT_FULL_WIDTH / cellWorld) * cellPx,
+    Math.sqrt(3) * cellPx * 0.85 // never fully close the openings
+  );
+  const tex = createHexTexture({ cellPx, lineWidth });
+  if (ribbonMaterial.bumpMap) ribbonMaterial.bumpMap.dispose();
+  ribbonMaterial.bumpMap = tex;
+  ribbonMaterial.roughnessMap = tex;
+  ribbonMaterial.needsUpdate = true;
+}
 function applyMaterialPreset(name) {
   const preset = MATERIAL_PRESETS[name] || MATERIAL_PRESETS.bronze;
   for (const mat of [sculptureMaterial, ribbonMaterial]) {
@@ -226,6 +247,7 @@ function rebuildRibbons() {
   // Match the ribbon's hex-bump tiling density to the star's actual hex-grid
   // cell size (in world units) so the two read as the same texture at the
   // same scale, not just the same pattern at an arbitrary size.
+  refreshRibbonTexture();
   const textureWorldSize = Math.sqrt(3) * faces[0].R_out * params.hexCellFraction;
 
   for (const { a, b } of pairs) {

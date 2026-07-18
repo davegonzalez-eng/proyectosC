@@ -123,11 +123,18 @@ export function buildRibbon(tipA, tipB, options = {}) {
     positions[i * 6 + 4] = edgeB.y;
     positions[i * 6 + 5] = edgeB.z;
 
+    // Both UV axes are mapped in *world units* at the same scale: one tile
+    // spans textureWorldSize along the length, and (the hex tile being
+    // sqrt(3) taller than wide) sqrt(3) x textureWorldSize across the
+    // width - measured from the actual local half-width, so the hexes stay
+    // the same physical size everywhere instead of stretching to fit the
+    // ribbon's varying width. RepeatWrapping handles the fractional span.
     const uvU = t * uRepeat;
+    const uvVHalf = width / (textureWorldSize * Math.sqrt(3));
     uvs[i * 4 + 0] = uvU;
-    uvs[i * 4 + 1] = 0;
+    uvs[i * 4 + 1] = 0.5 + uvVHalf;
     uvs[i * 4 + 2] = uvU;
-    uvs[i * 4 + 3] = 1;
+    uvs[i * 4 + 3] = 0.5 - uvVHalf;
 
     if (i < segments) {
       const a = i * 2;

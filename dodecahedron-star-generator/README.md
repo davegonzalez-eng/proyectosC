@@ -326,15 +326,30 @@ the near-mirror chrome one — actually show reflections instead of reading
 flat and dark.
 
 The ribbon material additionally carries a hex-pattern bump/roughness map
-(`src/hextexture.js:createHexTexture()`) — a small canvas of hexagon
-outlines, sized so it tiles seamlessly (`THREE.RepeatWrapping`) — so the
-ribbon reads as "the same texture" as the star's own 3D hex-grid fill (§10),
-just applied as a relief pattern rather than literal geometry (a ribbon
-twists too much along its length for tiling actual 3D hex struts onto it to
-be practical). `buildRibbon()` writes UV coordinates from actual arc length
-(via `curve.getLength()`), and the tiling density is matched to the real
-world-space hex-grid cell size (`sqrt(3) × R_out × hexCellFraction`) so the
-two don't just share a pattern but the same apparent scale.
+(`src/hextexture.js:createHexTexture()`) — a small seamlessly-tiling canvas
+(`THREE.RepeatWrapping`) — so the ribbon reads as "the same texture" as the
+star's own 3D hex-grid fill (§10), just applied as a relief pattern rather
+than literal geometry (a ribbon twists too much along its length for tiling
+actual 3D hex struts onto it to be practical). Three things are matched to
+the real fill, not just the pattern shape:
+
+- **Scale along the length:** `buildRibbon()` writes U coordinates from
+  actual arc length (via `curve.getLength()`), one tile per
+  `sqrt(3) × R_out × hexCellFraction` world units — the fill's true
+  horizontal cell pitch.
+- **Scale across the width:** the V coordinate is *also* mapped in world
+  units at the same scale, measured from the ribbon's actual local
+  half-width — not stretched so one tile spans the full width, which is
+  what previously made ribbon hexes look several times larger than the
+  fill's (and squashed them as the width tapered). With world-unit V, the
+  hexes stay the same physical size everywhere; narrow stretches simply
+  show fewer of them.
+- **Openness:** the fill's struts have a fixed world width (0.03), so at
+  the fine 0.02 default cell size the fill reads as a perforated sheet
+  with small openings, not thin hex outlines. The texture's line thickness
+  is computed from that same strut-to-cell proportion (and the texture is
+  regenerated whenever the cell-size slider moves), so both surfaces show
+  the same small-holes look at the same pitch.
 
 ### 12. Collapsing the control panel
 
