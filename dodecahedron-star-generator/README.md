@@ -300,16 +300,28 @@ Two mutually-exclusive checkboxes (checking one unchecks the other):
   panel; with thickness it becomes two parallel layers offset along the
   face normal (the edge gap between them hides inside the tube, so no side
   wall is needed).
-- **Fill star interior (hex grid)** (`src/hexgrid.js`) tiles a pointy-top
-  hexagonal grid across the same local 2D coordinates, clips each hex edge
-  against the star's (concave) outline using a generic segment/polygon
-  clip - not just an inside/outside test, so partial cells along the
-  boundary are cut cleanly rather than dropped or left overhanging - and
-  extrudes every surviving strut into a thin box (top, bottom, two side
-  walls) via the shared `applyTipDip()` (§6b) plus the same bulge formula,
-  so it follows the star's *actual* surface with real edge thickness. Cell
-  size is tunable via the **Hex cell size** slider (default 0.02, stepping
-  in fine 0.005 increments down to 0.01).
+- **Fill star interior (cellular grid)** (`src/hexgrid.js`) tiles a
+  pointy-top hexagonal lattice across the same local 2D coordinates, clips
+  each edge against the star's (concave) outline using a generic
+  segment/polygon clip - not just an inside/outside test, so partial cells
+  along the boundary are cut cleanly rather than dropped or left
+  overhanging - and extrudes every surviving strut into a thin box (top,
+  bottom, two side walls) via the shared `applyTipDip()` (§6b) plus the
+  same bulge formula, so it follows the star's *actual* surface with real
+  edge thickness. Cell size is tunable via the **Cell size** slider
+  (default 0.02, stepping in fine 0.005 increments down to 0.01).
+
+  **Organic irregularity:** the **Irregularity** slider (default 0.35)
+  displaces every lattice vertex by a deterministic pseudo-random offset
+  hashed from its own pre-jitter position - so the three cells sharing a
+  vertex all move it identically and the tiling stays watertight - and
+  varies each strut's width (0.6-1.4x, hashed from its midpoint). Jittering
+  a hex lattice's vertices is the classic cheap stand-in for a Voronoi
+  diagram: cells vary in size and shape, and the fill reads as porous,
+  cellular material - coral, bone tissue, sea sponge - rather than a
+  mechanical hex mesh. At 0 it's back to perfect hexagons. Determinism
+  matters: the same slider values always produce the identical pattern
+  (verified bit-for-bit across rebuilds).
 
 Both fills take their slab thickness from the **Fill thick** slider
 (default **0.012** world units — deliberately equal to the ribbons'
@@ -320,47 +332,61 @@ care since it generates brand-new interior points directly in `(u, w)`
 space with no original `r2` to place them from - see the `rFinal` note in
 §6b for how that's kept exact rather than approximate.
 
-### 11. Materials
+### 11. Materials and the lamp
 
 Two `MeshStandardMaterial` instances - one for the stars/membranes, one for
-ribbons - are kept in sync on color/metalness/roughness (so the piece reads
-as one cast/printed material, not mixed parts) and switchable from the
-**Material** dropdown:
+ribbons - are kept in sync on color/metalness/roughness/envMapIntensity (so
+the piece reads as one cast/printed material, not mixed parts) and
+switchable from the **Material** dropdown:
 
+- **Matte white (lamp)** — the default: near-white, metalness 0, roughness
+  0.95, environment reflections dialed way down (0.25) — reads as matte,
+  opaque 3D-printed material
 - **Bronze** — warm gold, metalness 0.75, roughness 0.32 (the original look)
 - **Titanium** — cool grey, metalness 0.9, roughness 0.45 (brushed, not mirror-like)
 - **Metallized (chrome)** — near-white, metalness 1.0, roughness 0.08
 
 A generated `RoomEnvironment` (via `THREE.PMREMGenerator`, no external HDRI
-needed) is set as `scene.environment` so the metallic presets — especially
-the near-mirror chrome one — actually show reflections instead of reading
-flat and dark.
+needed) is set as `scene.environment` so the metallic presets show real
+reflections; the matte preset mostly ignores it.
 
-The ribbon material additionally carries a hex-pattern bump/roughness map
+**The lamp itself:** a warm (`0xffb46b`) `PointLight` with physical
+inverse-square falloff sits at the sphere's center, alongside a small
+emissive "bulb" sphere so a glowing source is visible through the voids.
+The **Lamp glow** slider (default 25, 0 = off) drives only the light - no
+geometry rebuild - and the exterior lights are kept deliberately dim so the
+internal glow reads as the main light source, highlighting the folds'
+contours from inside and shining through the perforations. The renderer
+uses ACES filmic tone mapping so the warm glow rolls off gently instead of
+clipping to flat white.
+
+The ribbon material additionally carries a bump/roughness map
 (`src/hextexture.js:createHexTexture()`) — a small seamlessly-tiling canvas
-(`THREE.RepeatWrapping`) — so the ribbon reads as "the same texture" as the
-star's own 3D hex-grid fill (§10), just applied as a relief pattern rather
-than literal geometry (a ribbon twists too much along its length for tiling
-actual 3D hex struts onto it to be practical). Three things are matched to
-the real fill, not just the pattern shape:
+(`THREE.RepeatWrapping`) of the *same* jittered cellular pattern the 3D
+fill builds as real geometry, drawn with the same hash-based vertex jitter
+and per-edge width variation. The tile spans 4 hex columns × 8 rows so the
+irregularity has room to vary, and every jitter/width hash uses the
+vertex's position wrapped modulo the tile size, so cells crossing the tile
+border land identically on both sides - seamless under repetition. Three
+things are matched to the real fill, not just the pattern shape:
 
 - **Scale along the length:** `buildRibbon()` writes U coordinates from
   actual arc length (via `curve.getLength()`), one tile per
-  `sqrt(3) × R_out × hexCellFraction` world units — the fill's true
-  horizontal cell pitch.
+  `4 × sqrt(3) × R_out × hexCellFraction` world units — 4 columns of the
+  fill's true cell pitch.
 - **Scale across the width:** the V coordinate is *also* mapped in world
   units at the same scale, measured from the ribbon's actual local
   half-width — not stretched so one tile spans the full width, which is
-  what previously made ribbon hexes look several times larger than the
+  what previously made ribbon cells look several times larger than the
   fill's (and squashed them as the width tapered). With world-unit V, the
-  hexes stay the same physical size everywhere; narrow stretches simply
+  cells stay the same physical size everywhere; narrow stretches simply
   show fewer of them.
 - **Openness:** the fill's struts have a fixed world width (0.03), so at
   the fine 0.02 default cell size the fill reads as a perforated sheet
-  with small openings, not thin hex outlines. The texture's line thickness
-  is computed from that same strut-to-cell proportion (and the texture is
-  regenerated whenever the cell-size slider moves), so both surfaces show
-  the same small-holes look at the same pitch.
+  with small openings, not thin outlines. The texture's line thickness is
+  computed from that same strut-to-cell proportion (and the texture is
+  regenerated whenever the cell-size or irregularity slider moves), so
+  both surfaces show the same small-holes look at the same pitch.
 
 ### 12. Collapsing the control panel
 

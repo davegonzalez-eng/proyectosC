@@ -9,6 +9,13 @@
 import * as THREE from 'three';
 import { applyTipDip } from './geometry.js';
 
+/** Cheap deterministic hash of two integers to [0, 1). */
+export function hash2(x, y) {
+  let h = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
 function pointInPolygon(pt, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -56,15 +63,24 @@ function clipSegmentToPolygon(a, b, poly) {
 }
 
 /**
- * Edges of a pointy-top hex grid covering `polygon`'s bounding box, clipped
- * to the polygon and de-duplicated so shared edges between adjacent hexes
- * are only returned once.
+ * Edges of a (optionally jittered) pointy-top hex grid covering `polygon`'s
+ * bounding box, clipped to the polygon and de-duplicated so shared edges
+ * between adjacent cells are only returned once.
+ *
+ * With `jitter` > 0 every lattice vertex is displaced by a deterministic
+ * pseudo-random offset derived from its own (pre-jitter) position - so the
+ * three cells sharing a vertex all move it identically, and the grid stays
+ * a watertight tiling of irregular polygons. Jittering a hex lattice's
+ * vertices is a classic cheap stand-in for a Voronoi diagram of jittered
+ * seeds: cells vary in size and shape, reading organic/cellular rather
+ * than mechanical.
  *
  * @param {{x:number,y:number}[]} polygon
  * @param {number} cellSize hex "radius" (center to corner)
+ * @param {number} [jitter=0] vertex displacement as a fraction of cellSize (0..~0.5)
  * @returns {[{x,y},{x,y}][]}
  */
-export function hexGridEdges(polygon, cellSize) {
+export function hexGridEdges(polygon, cellSize, jitter = 0) {
   const xs = polygon.map((p) => p.x);
   const ys = polygon.map((p) => p.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
@@ -74,6 +90,17 @@ export function hexGridEdges(polygon, cellSize) {
   const rowStep = 1.5 * cellSize;
   const rows = Math.ceil((maxY - minY) / rowStep) + 2;
   const cols = Math.ceil((maxX - minX) / colStep) + 2;
+
+  const jitterCorner = (p) => {
+    if (!jitter) return p;
+    // Hash the pre-jitter position (quantized in cell units) so every cell
+    // computes the identical offset for a shared corner.
+    const ix = Math.round((p.x / cellSize) * 50);
+    const iy = Math.round((p.y / cellSize) * 50);
+    const angle = hash2(ix, iy) * Math.PI * 2;
+    const mag = (0.35 + 0.65 * hash2(ix + 7919, iy - 104729)) * jitter * cellSize;
+    return { x: p.x + Math.cos(angle) * mag, y: p.y + Math.sin(angle) * mag };
+  };
 
   const edgeMap = new Map();
   const addEdge = (p1, p2) => {
@@ -91,7 +118,7 @@ export function hexGridEdges(polygon, cellSize) {
       const corners = [];
       for (let i = 0; i < 6; i++) {
         const angle = (Math.PI / 180) * (60 * i - 30);
-        corners.push({ x: cx + cellSize * Math.cos(angle), y: cy + cellSize * Math.sin(angle) });
+        corners.push(jitterCorner({ x: cx + cellSize * Math.cos(angle), y: cy + cellSize * Math.sin(angle) }));
       }
       for (let i = 0; i < 6; i++) addEdge(corners[i], corners[(i + 1) % 6]);
     }
@@ -119,10 +146,10 @@ export function hexGridEdges(polygon, cellSize) {
  * @returns {THREE.BufferGeometry}
  */
 export function buildHexGrid(face, star, params) {
-  const { cellFraction = 0.22, strutWidth = 0.015, bulgeStrength = 0, tipDipStrength = 0, thickness = 0 } = params;
+  const { cellFraction = 0.22, strutWidth = 0.015, bulgeStrength = 0, tipDipStrength = 0, thickness = 0, jitter = 0 } = params;
   const cellSize = face.R_out * cellFraction;
   const polygon = star.outline2D.map((p) => ({ x: p.u, y: p.w }));
-  const edges = hexGridEdges(polygon, cellSize);
+  const edges = hexGridEdges(polygon, cellSize, jitter);
   const halfT = thickness / 2;
 
   const place = (u, w) => {
@@ -148,7 +175,15 @@ export function buildHexGrid(face, star, params) {
     const dir = b.clone().sub(a);
     if (dir.lengthSq() < 1e-10) continue;
     dir.normalize();
-    const perp = dir.clone().cross(face.normal).normalize().multiplyScalar(strutWidth);
+    // With jitter active, vary each strut's width too (deterministically,
+    // from its midpoint) - membrane-like tissue rather than uniform wire.
+    let widthScale = 1;
+    if (jitter) {
+      const mx = Math.round(((p1.x + p2.x) / 2 / cellSize) * 50);
+      const my = Math.round(((p1.y + p2.y) / 2 / cellSize) * 50);
+      widthScale = 0.6 + 0.8 * hash2(mx + 31337, my - 271);
+    }
+    const perp = dir.clone().cross(face.normal).normalize().multiplyScalar(strutWidth * widthScale);
 
     const p1a = a.clone().add(perp);
     const p1b = a.clone().sub(perp);

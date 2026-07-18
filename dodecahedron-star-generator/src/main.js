@@ -6,7 +6,7 @@ import { buildDodecahedron, buildStar, computeAdjacentFaceConnections } from './
 import { buildRibbon } from './ribbon.js';
 import { buildMembrane } from './membrane.js';
 import { buildHexGrid } from './hexgrid.js';
-import { createHexTexture } from './hextexture.js';
+import { createHexTexture, TEXTURE_COLS } from './hextexture.js';
 import { buildStarTube } from './startube.js';
 
 // ---------------------------------------------------------------------
@@ -29,6 +29,8 @@ const params = {
   ribbonDepthFraction: 0.93,
   ribbonThickness: 0.012,
   fillThickness: 0.012,
+  organicJitter: 0.35,
+  lampIntensity: 25,
   showFaceLabels: false,
   showArmLabels: false,
   showMembrane: false,
@@ -37,9 +39,10 @@ const params = {
 };
 
 const MATERIAL_PRESETS = {
-  bronze: { label: 'Bronze', color: 0xd7b978, metalness: 0.75, roughness: 0.32 },
-  titanium: { label: 'Titanium', color: 0x9aa0a6, metalness: 0.9, roughness: 0.45 },
-  metallized: { label: 'Metallized (chrome)', color: 0xe8e9eb, metalness: 1.0, roughness: 0.08 },
+  matteWhite: { label: 'Matte white (lamp)', color: 0xf4f1ea, metalness: 0.0, roughness: 0.95, envMapIntensity: 0.25 },
+  bronze: { label: 'Bronze', color: 0xd7b978, metalness: 0.75, roughness: 0.32, envMapIntensity: 1 },
+  titanium: { label: 'Titanium', color: 0x9aa0a6, metalness: 0.9, roughness: 0.45, envMapIntensity: 1 },
+  metallized: { label: 'Metallized (chrome)', color: 0xe8e9eb, metalness: 1.0, roughness: 0.08, envMapIntensity: 1 },
 };
 
 const RADIUS = 2;
@@ -71,6 +74,10 @@ camera.position.set(4.2, 3.2, 5.2);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
+// Filmic tone mapping keeps the warm internal lamp glow from clipping to
+// flat white where it's brightest.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
 container.appendChild(renderer.domElement);
 
 // A generated (no external HDRI needed) room environment so metallic
@@ -91,13 +98,25 @@ controls.enableDamping = true;
 controls.minDistance = 2.5;
 controls.maxDistance = 20;
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x33303a, 0.6));
-const key = new THREE.DirectionalLight(0xffffff, 1.1);
+// Exterior lights kept dim so the warm internal lamp reads as the main
+// light source; they just keep the unlit outer side from going black.
+scene.add(new THREE.HemisphereLight(0xffffff, 0x33303a, 0.35));
+const key = new THREE.DirectionalLight(0xffffff, 0.65);
 key.position.set(5, 8, 6);
 scene.add(key);
-const fill = new THREE.DirectionalLight(0x88aaff, 0.35);
+const fill = new THREE.DirectionalLight(0x88aaff, 0.2);
 fill.position.set(-6, -3, -4);
 scene.add(fill);
+
+// The lamp: a warm point light at the sculpture's center plus a small
+// emissive "bulb" so there's a visible glowing source through the voids.
+const lampLight = new THREE.PointLight(0xffb46b, params.lampIntensity, 0, 2);
+scene.add(lampLight);
+const lampCore = new THREE.Mesh(
+  new THREE.SphereGeometry(0.3, 32, 16),
+  new THREE.MeshStandardMaterial({ color: 0xfff3d8, emissive: 0xffc07a, emissiveIntensity: 2.5, roughness: 1 })
+);
+scene.add(lampCore);
 
 // One shared material for the stars and membranes so the whole piece reads
 // as a single cast/printed material rather than mixed parts. Ribbons share
@@ -118,32 +137,33 @@ const ribbonMaterial = new THREE.MeshStandardMaterial({
 // texture's hexes must be drawn with equally thick edges (not thin
 // outlines) or they read as much larger cells even at identical pitch.
 const HEXGRID_STRUT_FULL_WIDTH = 0.03; // 2 x hexgrid.js strutWidth default
-let ribbonTextureCellKey = null;
+let ribbonTextureKey = null;
 function refreshRibbonTexture() {
-  if (params.hexCellFraction === ribbonTextureCellKey) return;
-  ribbonTextureCellKey = params.hexCellFraction;
-  const cellPx = 48;
+  const key = `${params.hexCellFraction}|${params.organicJitter}`;
+  if (key === ribbonTextureKey) return;
+  ribbonTextureKey = key;
+  const cellPx = 24;
   const cellWorld = faces[0].R_out * params.hexCellFraction;
   const lineWidth = Math.min(
     (HEXGRID_STRUT_FULL_WIDTH / cellWorld) * cellPx,
     Math.sqrt(3) * cellPx * 0.85 // never fully close the openings
   );
-  const tex = createHexTexture({ cellPx, lineWidth });
+  const tex = createHexTexture({ cellPx, lineWidth, jitter: params.organicJitter });
   if (ribbonMaterial.bumpMap) ribbonMaterial.bumpMap.dispose();
   ribbonMaterial.bumpMap = tex;
   ribbonMaterial.roughnessMap = tex;
   ribbonMaterial.needsUpdate = true;
 }
 function applyMaterialPreset(name) {
-  const preset = MATERIAL_PRESETS[name] || MATERIAL_PRESETS.bronze;
+  const preset = MATERIAL_PRESETS[name] || MATERIAL_PRESETS.matteWhite;
   for (const mat of [sculptureMaterial, ribbonMaterial]) {
     mat.color.setHex(preset.color);
     mat.metalness = preset.metalness;
+    mat.roughness = preset.roughness;
+    mat.envMapIntensity = preset.envMapIntensity;
   }
-  sculptureMaterial.roughness = preset.roughness;
-  ribbonMaterial.roughness = preset.roughness;
 }
-applyMaterialPreset('bronze');
+applyMaterialPreset('matteWhite');
 
 // Arm-tip markers exist for click-to-pick raycasting, not to be seen - a
 // visible dot right where the ribbon should fuse with the arm reads as a
@@ -190,6 +210,7 @@ function rebuildStars() {
         bulgeStrength: params.bulgeStrength,
         tipDipStrength: params.tipDipStrength,
         thickness: params.fillThickness,
+        jitter: params.organicJitter,
       });
       membraneGroup.add(new THREE.Mesh(hexGeom, sculptureMaterial));
     } else if (params.showMembrane) {
@@ -251,7 +272,10 @@ function rebuildRibbons() {
   // cell size (in world units) so the two read as the same texture at the
   // same scale, not just the same pattern at an arbitrary size.
   refreshRibbonTexture();
-  const textureWorldSize = Math.sqrt(3) * faces[0].R_out * params.hexCellFraction;
+  // The texture tile now spans TEXTURE_COLS hex columns (so the jittered
+  // irregularity has room to vary), so one tile covers that many
+  // column-steps of world distance.
+  const textureWorldSize = TEXTURE_COLS * Math.sqrt(3) * faces[0].R_out * params.hexCellFraction;
 
   for (const { a, b } of pairs) {
     const tipA = tipsByLabel.get(a);
@@ -332,6 +356,21 @@ bindSlider('ribbonDepth', 'ribbonDepthFraction', {
 bindSlider('ribbonThick', 'ribbonThickness', { format: (v) => v.toFixed(3) });
 bindSlider('fillThick', 'fillThickness', { format: (v) => v.toFixed(3) });
 bindSlider('hexCell', 'hexCellFraction', { format: (v) => v.toFixed(3) });
+bindSlider('organic', 'organicJitter', { format: (v) => v.toFixed(2) });
+
+// Lamp glow only touches the light - no geometry rebuild needed.
+{
+  const input = document.getElementById('lampGlow');
+  const readout = document.getElementById('lampGlow-value');
+  const apply = () => {
+    params.lampIntensity = Number(input.value);
+    lampLight.intensity = params.lampIntensity;
+    lampCore.visible = params.lampIntensity > 0;
+    readout.textContent = params.lampIntensity.toFixed(0);
+  };
+  input.addEventListener('input', apply);
+  apply();
+}
 
 document.getElementById('wave-enabled').addEventListener('change', (e) => {
   params.waveEnabled = e.target.checked;

@@ -209,19 +209,39 @@
     </div>
     <div class="check-row">
       <input type="checkbox" id="hex-grid-mode" checked />
-      <label for="hex-grid-mode">Fill star interior (hex grid)</label>
+      <label for="hex-grid-mode">Fill star interior (cellular grid)</label>
     </div>
     <div class="row">
-      <label for="hexCell">Hex cell size</label>
+      <label for="hexCell">Cell size</label>
       <input id="hexCell" type="range" min="0.01" max="0.4" step="0.005" value="0.02" />
       <span class="val" id="hexCell-value"></span>
+    </div>
+    <div class="row">
+      <label for="organic">Irregularity</label>
+      <input id="organic" type="range" min="0" max="0.5" step="0.01" value="0.35" />
+      <span class="val" id="organic-value"></span>
+    </div>
+    <div class="hint" style="margin-top: -6px;">
+      Jitters the cell lattice and varies strut widths so the perforations
+      read organic/cellular - coral, bone, a Voronoi diagram - instead of a
+      mechanical hex grid. 0 = perfectly regular hexagons.
+    </div>
+    <div class="row">
+      <label for="lampGlow">Lamp glow</label>
+      <input id="lampGlow" type="range" min="0" max="80" step="1" value="25" />
+      <span class="val" id="lampGlow-value"></span>
+    </div>
+    <div class="hint" style="margin-top: -6px;">
+      Warm light source at the sphere's center, shining out through the
+      voids and perforations. 0 turns the lamp off.
     </div>
 
     <div class="row" style="margin-top: 12px;">
       <label for="material-select"><strong>Material</strong></label>
     </div>
     <select id="material-select">
-      <option value="bronze" selected>Bronze</option>
+      <option value="matteWhite" selected>Matte white (lamp)</option>
+      <option value="bronze">Bronze</option>
       <option value="titanium">Titanium</option>
       <option value="metallized">Metallized (chrome)</option>
     </select>
