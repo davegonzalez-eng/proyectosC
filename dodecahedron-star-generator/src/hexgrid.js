@@ -7,7 +7,7 @@
 // the same surface instead of drifting away from it near the edges.
 
 import * as THREE from 'three';
-import { applyTipDip } from './geometry.js';
+import { applyTipDip, applySurfaceTwist } from './geometry.js';
 
 /** Cheap deterministic hash of two integers to [0, 1). */
 export function hash2(x, y) {
@@ -161,6 +161,7 @@ export function buildHexGrid(face, star, params) {
     junctionSink = 0,
     sinkNear = 0,
     sinkFar = 0,
+    surfTwistRad = 0,
   } = params;
   const cellSize = face.R_out * cellFraction;
   const polygon = star.outline2D.map((p) => ({ x: p.u, y: p.w }));
@@ -184,7 +185,7 @@ export function buildHexGrid(face, star, params) {
   const place = (u, w) => {
     const r2 = Math.sqrt(u * u + w * w);
     const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r2 / face.R_out, 2)) : 0;
-    const world = face.center.clone().addScaledVector(face.U, u).addScaledVector(face.W, w).addScaledVector(face.normal, bulge);
+    const world = face.center.clone().add(applySurfaceTwist(face, u, w, bulge, surfTwistRad));
     applyTipDip(world, r2, face, tipDipStrength);
     const sink = sinkAt(u, w);
     if (sink) world.addScaledVector(world.clone().normalize(), -sink);

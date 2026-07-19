@@ -93,10 +93,33 @@ read as one continuous curve instead of a rod meeting a star:
   ribbon needs to go, leaving it less ground to cover).
 - **Tip curl** adds extra swirl rotation on top of the base swirl,
   concentrated near the tip: `swirlTheta += curl · (r2/R_out)^1.6`. Default
-  **24°**. Combined with arm reach and the earlier-onset tip dip below, the
-  arm spends its last stretch already spiraling and sinking toward the
-  ribbon's own trajectory, so the ribbon only has to finish a curve already
-  in progress rather than execute a sharp U-turn from a standing start.
+  **50°** (with base swirl at 10°) — an aggressive but *graded* sweep,
+  barely rotating near the star's center and accelerating toward the arm
+  ends, per the reference Quin's pinwheeling arms. Combined with arm reach
+  and the earlier-onset tip dip below, the arm spends its last stretch
+  already spiraling and sinking toward the ribbon's own trajectory, so the
+  ribbon only has to finish a curve already in progress rather than
+  execute a sharp U-turn from a standing start.
+
+### 4d. Surface twist (rolling the shells)
+
+The **Surface twist** slider (default **30°**) twists the star's *surface*
+the way the ribbons twist along their length: counter-clockwise, in the
+planes perpendicular to the direction each arm runs, small near the star's
+center and growing toward the rim as `(r/R_out)^1.6`. Implementation
+(`applySurfaceTwist()` in `src/geometry.js`): each point's dome (normal)
+component is rotated about that point's own in-plane radial direction —
+the in-plane part lies exactly on the rotation axis, so only the dome
+leans sideways toward the CCW tangential direction, rolling the shell like
+a blade. Because the formula depends only on the point's final `(u, w)`
+coordinates and bulge height, the tube outline and the cellular fill
+compute the *identical* twist (the function is shared), keeping them flush
+at their boundary — verified numerically at 30°: max fill/tube boundary
+deviation 0.000000000, in-plane radius preserved exactly, and the
+tangential lean confirmed CCW. This is what the older per-arm "Arm-axis
+twist" (§4b) could never do — its per-arm rotation axes aren't derivable
+from `(u, w)` alone, so it would detach the fill (which is why it defaults
+to 0).
 
 ### 5. Waving (radial distortion)
 
@@ -186,7 +209,10 @@ touching it), which buys two precise guarantees:
   configured fraction.) Tunable via the **Ribbon depth** slider (50–100%).
 - **Sinkable junctions.** Ribbon depth only moves the mid-dip; the junction
   anchors — arm tips, tube cut edges, ribbon endpoints — stay at the star
-  surface by default. The **Joint sink** slider (0–0.4, default 0) pulls
+  surface by default. Gated by the **Enable joint sink** checkbox (off by
+  default — unchecking undoes the effect entirely, rechecking redoes it at
+  the remembered slider amount). When enabled, the **Joint sink** slider
+  (0–0.4, default 0.15) pulls
   that whole junction set radially inward toward the sphere's center: the
   tube sinks its rings near each cut edge (full strength at the edge,
   fading to zero a short parameter distance into the segment), the

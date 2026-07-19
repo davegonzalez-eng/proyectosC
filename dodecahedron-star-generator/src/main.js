@@ -14,20 +14,22 @@ import { buildStarTube } from './startube.js';
 // ---------------------------------------------------------------------
 
 const params = {
-  swirlDeg: 3,
+  swirlDeg: 10,
   k: 2.7,
   waveEnabled: true,
   innerRatio: 0.382,
   tipScale: 0.8,
   bulgeStrength: 0.2,
   armTwistDeg: 0,
-  curlDeg: 24,
+  curlDeg: 50,
+  surfTwistDeg: 30,
   tipDipStrength: 0.36,
   tubeRadius: 0.03,
   twistTurns: 0.5,
   ribbonHalfWidth: 0.09,
   ribbonDepthFraction: 0.93,
-  junctionSink: 0,
+  jointSinkEnabled: false,
+  junctionSink: 0.15,
   ribbonThickness: 0.012,
   fillThickness: 0.012,
   organicJitter: 0.35,
@@ -202,8 +204,12 @@ function rebuildStars() {
   for (const face of faces) {
     const star = buildStar(face, params);
 
+    // The joint-sink checkbox is a hard on/off for the whole feature; the
+    // slider value is kept so toggling redoes/undoes the same sink amount.
+    const effectiveSink = params.jointSinkEnabled ? params.junctionSink : 0;
+
     const { geometry: tubeGeom, cuts, perimeter, sinkNear, sinkFar } = buildStarTube(star, params.tubeRadius, {
-      junctionSink: params.junctionSink,
+      junctionSink: effectiveSink,
     });
     starsGroup.add(new THREE.Mesh(tubeGeom, sculptureMaterial));
 
@@ -214,7 +220,8 @@ function rebuildStars() {
         tipDipStrength: params.tipDipStrength,
         thickness: params.fillThickness,
         jitter: params.organicJitter,
-        junctionSink: params.junctionSink,
+        surfTwistRad: THREE.MathUtils.degToRad(params.surfTwistDeg),
+        junctionSink: effectiveSink,
         // Convert the tube's parameter-space sink falloff to world distances
         // so the fill dips around each tip in step with the tube ends.
         sinkNear: sinkNear * perimeter,
@@ -222,7 +229,7 @@ function rebuildStars() {
       });
       membraneGroup.add(new THREE.Mesh(hexGeom, sculptureMaterial));
     } else if (params.showMembrane) {
-      const membraneGeom = buildMembrane(star, face, params.fillThickness, params.junctionSink);
+      const membraneGeom = buildMembrane(star, face, params.fillThickness, effectiveSink);
       membraneGroup.add(new THREE.Mesh(membraneGeom, sculptureMaterial));
     }
 
@@ -299,7 +306,7 @@ function rebuildRibbons() {
       tubeRadius: params.tubeRadius,
       twistTurns: params.twistTurns,
       depthFraction: params.ribbonDepthFraction,
-      junctionSink: params.junctionSink,
+      junctionSink: params.jointSinkEnabled ? params.junctionSink : 0,
       textureWorldSize,
       thickness: params.ribbonThickness,
       // Match the tube's flattened cut-edge thickness (2 x its minor axis,
@@ -363,6 +370,13 @@ bindSlider('ribbonDepth', 'ribbonDepthFraction', {
   format: (v) => `${Math.round(v * 100)}%`,
 });
 bindSlider('jointSink', 'junctionSink', { format: (v) => v.toFixed(2) });
+bindSlider('surfTwist', 'surfTwistDeg', { format: (v) => `${v.toFixed(0)}°` });
+
+document.getElementById('joint-sink-enable').addEventListener('change', (e) => {
+  params.jointSinkEnabled = e.target.checked;
+  rebuildStars();
+  rebuildRibbons();
+});
 bindSlider('ribbonThick', 'ribbonThickness', { format: (v) => v.toFixed(3) });
 bindSlider('fillThick', 'fillThickness', { format: (v) => v.toFixed(3) });
 bindSlider('hexCell', 'hexCellFraction', { format: (v) => v.toFixed(3) });

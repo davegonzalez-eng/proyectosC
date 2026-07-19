@@ -162,7 +162,7 @@ export function buildDodecahedron(radius = 1) {
  * the star's own surface.
  */
 function distortPoint(face, angle, r2, armAxis, params) {
-  const { swirlRad, k, waveEnabled, bulgeStrength, armTwistRad, tipDipStrength, curlRad } = params;
+  const { swirlRad, k, waveEnabled, bulgeStrength, armTwistRad, tipDipStrength, curlRad, surfTwistRad } = params;
 
   const curl = curlRad ? curlRad * Math.pow(r2 / face.R_out, CURL_POWER) : 0;
   const swirlTheta = angle + swirlRad * (r2 / face.R_out) + curl;
@@ -179,10 +179,7 @@ function distortPoint(face, angle, r2, armAxis, params) {
     ? bulgeStrength * (1 - Math.pow(rFinal / face.R_out, 2))
     : 0;
 
-  const offset = face.U.clone()
-    .multiplyScalar(u)
-    .addScaledVector(face.W, w)
-    .addScaledVector(face.normal, bulge);
+  const offset = applySurfaceTwist(face, u, w, bulge, surfTwistRad);
 
   if (armTwistRad && armAxis) {
     offset.applyAxisAngle(armAxis, armTwistRad * (r2 / face.R_out));
@@ -191,6 +188,38 @@ function distortPoint(face, angle, r2, armAxis, params) {
   const world = applyTipDip(face.center.clone().add(offset), rFinal, face, tipDipStrength);
 
   return { world, u, w };
+}
+
+/**
+ * Build a point's offset from the face center out of its final in-plane
+ * coordinates (u, w) and dome height, twisting the surface as it goes: the
+ * dome (normal) component is rotated counter-clockwise about the point's
+ * own in-plane radial direction, by an angle growing toward the star's rim
+ * as (r/R_out)^CURL_POWER - like the ribbons' twist, but for the star
+ * surface, in the planes perpendicular to the direction each arm runs.
+ * The in-plane part lies exactly along the rotation axis, so it is
+ * untouched; only the dome leans sideways (toward the CCW tangential
+ * direction), rolling the shells so arms can duck under their neighbors.
+ *
+ * Shared by `distortPoint` and the hex-grid fill: everything here is a
+ * function of (u, w, bulge) alone, so tube outline and fill compute the
+ * identical twist and stay flush at their boundary.
+ */
+export function applySurfaceTwist(face, u, w, bulge, surfTwistRad) {
+  const r = Math.sqrt(u * u + w * w);
+  if (!surfTwistRad || r < 1e-9) {
+    return face.U.clone()
+      .multiplyScalar(u)
+      .addScaledVector(face.W, w)
+      .addScaledVector(face.normal, bulge);
+  }
+  const phi = surfTwistRad * Math.pow(r / face.R_out, CURL_POWER);
+  const radDir = face.U.clone().multiplyScalar(u / r).addScaledVector(face.W, w / r);
+  const tangential = new THREE.Vector3().crossVectors(face.normal, radDir); // CCW in-plane direction
+  return radDir
+    .multiplyScalar(r)
+    .addScaledVector(face.normal, bulge * Math.cos(phi))
+    .addScaledVector(tangential, bulge * Math.sin(phi));
 }
 
 /**
@@ -207,13 +236,15 @@ function distortPoint(face, angle, r2, armAxis, params) {
  * @param {number} params.armTwistDeg  second "blade" swirl (deg) about each arm's own outward axis, applied at r = R_out
  * @param {number} params.tipDipStrength inward pull toward the sphere's center, ramping in ahead of the tip (world units at r2 = R_out)
  * @param {number} params.curlDeg     extra swirl rotation (deg) concentrated near the tip, applied at r2 = R_out
+ * @param {number} params.surfTwistDeg CCW twist of the surface's dome about each point's radial direction (deg at r = R_out), see applySurfaceTwist
  * @returns {StarResult}
  */
 export function buildStar(face, params) {
   const swirlRad = THREE.MathUtils.degToRad(params.swirlDeg || 0);
   const armTwistRad = THREE.MathUtils.degToRad(params.armTwistDeg || 0);
   const curlRad = THREE.MathUtils.degToRad(params.curlDeg || 0);
-  const p = { ...params, swirlRad, armTwistRad, curlRad };
+  const surfTwistRad = THREE.MathUtils.degToRad(params.surfTwistDeg || 0);
+  const p = { ...params, swirlRad, armTwistRad, curlRad, surfTwistRad };
 
   const baseAngle = (i) => {
     const v = face.vertices3D[i].clone().sub(face.center);

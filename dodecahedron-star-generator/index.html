@@ -111,7 +111,7 @@
     <div id="panel-body">
     <div class="row">
       <label for="swirl">Swirl</label>
-      <input id="swirl" type="range" min="0" max="90" step="1" value="3" />
+      <input id="swirl" type="range" min="0" max="90" step="1" value="10" />
       <span class="val" id="swirl-value"></span>
     </div>
     <div class="row">
@@ -126,8 +126,19 @@
     </div>
     <div class="row">
       <label for="curl">Tip curl</label>
-      <input id="curl" type="range" min="0" max="60" step="1" value="24" />
+      <input id="curl" type="range" min="0" max="120" step="1" value="50" />
       <span class="val" id="curl-value"></span>
+    </div>
+    <div class="row">
+      <label for="surfTwist">Surface twist</label>
+      <input id="surfTwist" type="range" min="0" max="90" step="1" value="30" />
+      <span class="val" id="surfTwist-value"></span>
+    </div>
+    <div class="hint" style="margin-top: -6px;">
+      Twists the star's surface like the ribbons twist: counterclockwise in
+      the planes perpendicular to each arm's direction, small near the star
+      center and growing toward the arm ends - the shells roll so arms can
+      duck under their neighbors.
     </div>
     <div class="hint" style="margin-top: -6px;">
       Longer arms (reach past 1.0) plus a spiral concentrated near the tip -
@@ -179,16 +190,21 @@
       Lowest point of a ribbon, as % of the face's own radius from the
       sculpture's center (93% = stays just under the surface).
     </div>
+    <div class="check-row">
+      <input type="checkbox" id="joint-sink-enable" />
+      <label for="joint-sink-enable">Enable joint sink</label>
+    </div>
     <div class="row">
       <label for="jointSink">Joint sink</label>
-      <input id="jointSink" type="range" min="0" max="0.4" step="0.01" value="0" />
+      <input id="jointSink" type="range" min="0" max="0.4" step="0.01" value="0.15" />
       <span class="val" id="jointSink-value"></span>
     </div>
     <div class="hint" style="margin-top: -6px;">
-      Pulls the arm-tip / ribbon interconnection points radially inward
-      (the fixed anchors that the Ribbon depth slider doesn't move) - tube
-      cut edges, tips, and ribbon ends all sink together, so the fusion
-      stays seamless. 0 keeps them at the surface.
+      When enabled, pulls the arm-tip / ribbon interconnection points
+      radially inward (the fixed anchors that the Ribbon depth slider
+      doesn't move) - tube cut edges, tips, fill and ribbon ends all sink
+      together, so the fusion stays seamless. Uncheck to undo, recheck to
+      redo the same amount.
     </div>
     <div class="row">
       <label for="ribbonThick">Ribbon thick</label>
