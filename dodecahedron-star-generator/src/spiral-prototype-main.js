@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron } from './geometry.js';
-import { buildSpiralBand } from './spiralarm.js';
+import { buildSpiralStar } from './spiralarm.js';
 
 const container = document.getElementById('scene-container');
 
@@ -65,11 +65,12 @@ scene.add(outlineLine);
 let bandMesh = null;
 
 const params = {
-  turns: 1.4,
-  holeLoopTurns: 0.85,
-  rHoleFrac: 0.16,
-  bandHalfWidth: 0.22,
-  endHalfWidthFrac: 0.32,
+  armCount: 5,
+  turns: 0.35,
+  holeLoopTurns: 0,
+  rHoleFrac: 0.22,
+  bandHalfWidth: 0.075,
+  endHalfWidthFrac: 0.15,
   thickness: 0.05,
   bulgeStrength: 0.2,
   tipDipStrength: 0.36,
@@ -81,14 +82,16 @@ function rebuild() {
     scene.remove(bandMesh);
     bandMesh.geometry.dispose();
   }
-  const { geometry, metrics } = buildSpiralBand(face, params);
+  const { geometry, arms } = buildSpiralStar(face, params);
   bandMesh = new THREE.Mesh(geometry, material);
   scene.add(bandMesh);
 
+  const m = arms[0].metrics;
   document.getElementById('metrics').innerHTML =
-    `Band width / face radius: ${metrics.bandWidthOverFaceRadius.toFixed(3)}<br>` +
-    `Total turning angle: ${metrics.totalTurningDeg.toFixed(0)}&deg;<br>` +
-    `Hole radius / band width: ${metrics.holeRadiusOverBandWidth.toFixed(2)}`;
+    `Arms: ${arms.length}<br>` +
+    `Band width / face radius: ${m.bandWidthOverFaceRadius.toFixed(3)}<br>` +
+    `Per-arm turning angle: ${m.totalTurningDeg.toFixed(0)}&deg;<br>` +
+    `Hole radius / band width: ${m.holeRadiusOverBandWidth.toFixed(2)}`;
 }
 
 function bindSlider(id, key) {
@@ -102,6 +105,7 @@ function bindSlider(id, key) {
   });
 }
 
+bindSlider('armCount', 'armCount');
 bindSlider('turns', 'turns');
 bindSlider('holeLoopTurns', 'holeLoopTurns');
 bindSlider('rHoleFrac', 'rHoleFrac');

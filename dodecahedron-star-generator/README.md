@@ -440,65 +440,87 @@ The chevron button in the panel's corner toggles a `.collapsed` class on
 the panel, hiding everything below the title/subtitle. Pure CSS/JS, no
 persistence across reloads.
 
-### 13. Option B prototype: one wide spiral band per face
+### 13. Option B prototype: 5 wide spiral arms per face
 
 Reference photos of Bathsheba Grossman-style paisley/Voronoi lamps show a
-much lower-density structure than the current 60-thin-arm lattice: roughly
-5-6 dominant, continuous, constant-width bands, each curling in a tight
-logarithmic spiral that closes into a small round terminal eye-hole,
-covering ~75-85% of the visible surface with no visible seams. Tuning the
-existing 5-thin-arm-per-face star's parameters can't reach that - it's a
-different topology, not a different parameter setting.
+much lower-density structure than the current 60-thin-arm lattice: a
+handful of dominant, continuous, wide bands, each curling in a tight
+logarithmic spiral toward a small terminal eye-hole. Tuning the existing
+5-thin-arm-per-face star's parameters can't reach that - it's a different
+topology, not a different parameter setting.
 
 `src/spiralarm.js` (a **new, separate module** - `geometry.js`/`startube.js`
 are untouched, kept as the current fallback/reference) prototypes the
-replacement motif for a single face in isolation:
+replacement motif for a single face in isolation. Two exported builders:
 
-- **Centerline**: a logarithmic spiral `r(theta) = r0 * exp(-k*theta)` in
-  the face's local `(u, w)` plane, starting at the rim (`theta = 0`, in the
-  same "vertex 0" direction the old arm 0's tip used, so a future version
-  can reuse the existing connection machinery) and spiraling inward over
-  `turns` full turns down to a small `rHoleFrac * R_out` radius. Past that
-  point the path continues at that constant radius for `holeLoopTurns` more
-  turns before ending, closing a loop.
-- **Cross-section**: built the same way `startube.js` orients its
-  flattened cut ends - `major = cross(tangent, radial-from-sphere-center)`,
-  `minor = cross(tangent, major)` - so the band lies flat against the
+- **`buildSpiralBand(face, params)`**: one arm's centerline is a
+  logarithmic spiral `r(theta) = r0 * exp(-k*theta)` in the face's local
+  `(u, w)` plane, starting at the rim (`theta = 0`, in the same "vertex 0"
+  direction the old arm 0's tip used, offset by `angleOffset` for the other
+  arms, so a future version can reuse the existing connection machinery)
+  and spiraling inward over `turns` turns down to a target inner radius,
+  tapering to a point there (or, with `holeLoopTurns` > 0, continuing at
+  that constant radius for more turns first - closing a small loop that
+  reads as a terminal eye-hole instead of a plain point).
+- **`buildSpiralStar(face, params)`**: places `armCount` (default 5, one
+  per pentagon vertex) rotated copies of `buildSpiralBand` and merges them
+  into one geometry.
+
+  **First attempt was a single arm sweeping the whole face** (1.4 turns,
+  closing into an eye-hole) - it read as one wide coil/blob, not a star.
+  Placing 5 of those unmodified (same turn count) came out as a solid
+  donut: 306° of turning per arm, at that width, made all 5 arms overlap
+  each other almost completely, and their shared closing radius punched
+  one uniform circular hole through the middle rather than 5 distinct
+  points. The fix was cutting per-arm turning down to ~126° (`turns=0.35`,
+  `holeLoopTurns=0` - a tapered point, no forced loop) and narrowing the
+  band (`bandHalfWidth` 0.22 -> 0.075 of `R_out`) so adjacent arms overlap
+  only partially, leaving visible negative space between them - a
+  recognizable 5-armed pinwheel, each arm a wide paisley-style blade.
+
+- **Cross-section** (shared by both builders): built the same way
+  `startube.js` orients its flattened cut ends -
+  `major = cross(tangent, radial-from-sphere-center)`,
+  `minor = cross(tangent, major)` - so each arm lies flat against the
   sphere's surface along its whole length, not just at its endpoints.
   Extruded into a real slab (top/bottom/2 side walls + 2 end caps), reusing
   the station-based extrusion technique from `ribbon.js`.
-- **Width taper**: mostly constant (matching the reference's constant-width
-  bands), tapering up from a thinner cross-section at the rim attachment
-  point (`t=0`, for a future seam with a neighboring face), and tapering
-  *down* to a thin strand (`endHalfWidthFrac` of the main width) before
-  entering the closing hole loop - without that taper, the wide band's
-  swept width simply overlaps its own center and the "hole" fills in
-  solid. The taper's position is computed from actual arc length, not the
+- **Width taper**: constant through most of an arm's length, tapering up
+  from a thinner cross-section at the rim attachment point (`t=0`, for a
+  future seam with a neighboring face), and tapering back down
+  (`endHalfWidthFrac` of the main width) toward the tip - if a hole loop is
+  enabled this taper is what keeps that loop's swept width narrower than
+  its own radius, so it reads as an open ring instead of filling in solid.
+  The taper's position is computed from actual arc length, not the
   spiral's own `theta` parameter, since arc length per radian shrinks
   sharply toward the tight inner turns.
 - Same distortion language as the rest of the sculpture (`applySurfaceTwist`,
-  `applyTipDip` from `geometry.js`, unmodified) is applied to the
+  `applyTipDip` from `geometry.js`, unmodified) is applied to every arm's
   centerline points, so this motif would sit on the same surface language
   as the current one if wired in later.
 
 `spiral-prototype.html` / `src/spiral-prototype-main.js` render exactly one
-face - the new band plus a wireframe outline of the pentagon it fills, and
-nothing else from the rest of the app - with live sliders for every shape
-parameter, so the motif can be judged (and the metrics below re-measured)
-without touching the main scene.
+face - the 5-arm star plus a wireframe outline of the pentagon it fills,
+and nothing else from the rest of the app - with live sliders for every
+shape parameter (including arm count), so the motif can be judged (and the
+metrics below re-measured) without touching the main scene.
 
-Checked standalone under Node: zero NaN/Infinity across the slab's ~1900
-vertices; with distortion disabled, the raw centerline's rim point and
-loop-tail point land at their exact target radii (`tipScale * R_out` and
-`rHoleFrac * R_out`) with zero deviation. Checked in headless Chromium:
-zero console errors; straight-on view (camera along the face normal) shows
-one continuous wide band spiraling from the rim to an open round terminal
-hole - not a solid disc and not 5 separate thin arms.
+Checked standalone under Node: zero NaN/Infinity across the merged
+geometry's ~9700 vertices; the 5 arms' rim points land at exactly 72°
+apart around the face normal (0.9°, 72.9°, 144.9°, -71.1°, -143.1° -
+uniform spacing to within float precision); with distortion disabled, a
+single arm's raw centerline rim point and tip land at their exact target
+radii with zero deviation. Checked in headless Chromium: zero console
+errors; straight-on view (camera along the face normal) shows 5 distinct
+overlapping-but-separated curling blades with visible gaps between them,
+not a solid disc, not a donut, and not 5 thin straight lines; angled view
+confirms real slab thickness and the bulge/tip-dip/surface-twist
+distortion carrying over correctly onto the new centerline.
 
 This is a single-face prototype only - not yet wired into the 12-face,
-60-connection sculpture. That wiring (deciding how this motif's single
-rim-attachment point per face relates to the existing 5-connections-per-face
-adjacency rule, then replacing every face's star + fill with this band)
+60-connection sculpture. That wiring (deciding how this motif's 5
+rim-attachment points per face relate to the existing 5-connections-per-face
+adjacency rule, then replacing every face's star + fill with this motif)
 is the next step, pending a read on whether this shape is the right
 direction before that larger effort.
 

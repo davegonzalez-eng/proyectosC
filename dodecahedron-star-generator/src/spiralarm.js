@@ -1,20 +1,27 @@
-// Option B prototype: a single wide, constant-width, logarithmic-spiral
-// band per face, replacing the current 5-thin-arm star for that face.
+// Option B prototype: replace the current 5-thin-arm star with 5 wide,
+// logarithmic-spiral "paisley" arms per face - `buildSpiralBand` builds one
+// such arm, `buildSpiralStar` places `armCount` (default 5) rotated copies
+// of it to form the whole face's motif. A single arm/coil covering the
+// whole face (the first version of this prototype) reads as a blob or a
+// donut, not a star - the star's identity comes from having 5 distinct
+// arms with visible gaps between them, each only curling partway to the
+// center, not one shape sweeping across the entire face.
 //
 // This is a NEW, separate module (not an in-place edit of geometry.js /
-// startube.js) precisely so the old 5-arm approach stays intact as a
+// startube.js) precisely so the old 5-thin-arm approach stays intact as a
 // fallback/reference while this is being validated in isolation - see
-// spiral-prototype.html, which renders exactly one face with this band and
+// spiral-prototype.html, which renders exactly one face with this motif and
 // nothing else from the rest of the app.
 //
-// Centerline: a logarithmic spiral r(theta) = r0 * exp(-k*theta), starting
-// at the face rim (theta = 0, r = r0, angle = the same "vertex 0" direction
-// the old star's arm 0 tip used) and spiraling inward over `turns` full
-// turns down to a small "hole" radius. Past that point the path continues
-// at constant radius for `holeLoopTurns` more turns before ending - since
-// the band is wide relative to that radius, this tight closing loop reads
-// as a small round terminal eye-hole (the reference lamps' paisley tips)
-// rather than the star's old sharp tip.
+// Centerline (one arm): a logarithmic spiral r(theta) = r0 * exp(-k*theta),
+// starting at the face rim (theta = 0, r = r0, angle = the same "vertex 0"
+// direction the old star's arm 0 tip used, offset by `angleOffset` for arms
+// 1-4) and spiraling inward over `turns` turns down to a target inner
+// radius, tapering to a point there. Setting `holeLoopTurns` > 0 continues
+// the path at ~constant radius for that many more turns before ending -
+// since the band is wide relative to that radius, this tight closing loop
+// reads as a small round terminal eye-hole (the reference lamps' paisley
+// tips) instead of a plain tapered point.
 //
 // The slab cross-section (major = width direction, minor = thickness
 // direction) is built the same way startube.js orients its flattened cut
@@ -49,6 +56,7 @@ function smoothstep(edge0, edge1, x) {
  * @param {number} [params.surfTwistDeg=0] surface twist (deg), same convention as buildStar's applySurfaceTwist
  * @param {number} [params.segments=240] arc-length-resampled extrusion stations
  * @param {number} [params.samples=500] raw parametric samples used to build the resampling curve
+ * @param {number} [params.angleOffset=0] rotates the whole arm's starting angle (rad) about the face normal - used by `buildSpiralStar` to place `armCount` copies at even rotations
  * @returns {{geometry: THREE.BufferGeometry, curve: THREE.CatmullRomCurve3, points: THREE.Vector3[], metrics: object}}
  */
 export function buildSpiralBand(face, params = {}) {
@@ -67,6 +75,7 @@ export function buildSpiralBand(face, params = {}) {
     surfTwistDeg = 0,
     segments = 240,
     samples = 500,
+    angleOffset = 0,
   } = params;
 
   const surfTwistRad = THREE.MathUtils.degToRad(surfTwistDeg);
@@ -82,8 +91,9 @@ export function buildSpiralBand(face, params = {}) {
 
   const place = (theta) => {
     const r = theta <= spiralThetaMax ? r0 * Math.exp(-kSpiral * theta) : rHole;
-    const u = r * Math.cos(theta);
-    const w = r * Math.sin(theta);
+    const angle = theta + angleOffset;
+    const u = r * Math.cos(angle);
+    const w = r * Math.sin(angle);
     const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
     const world = face.center.clone().add(applySurfaceTwist(face, u, w, bulge, surfTwistRad));
     applyTipDip(world, r, face, tipDipStrength);
@@ -195,4 +205,48 @@ export function buildSpiralBand(face, params = {}) {
   };
 
   return { geometry, curve, points, metrics };
+}
+
+/**
+ * A single spiral band, by itself, reads as one big coil - not a star: the
+ * pentagon face's 5-fold identity comes from having 5 arms, one per vertex
+ * direction, each curling only part of the way to the center rather than
+ * one arm sweeping the whole face. This places `armCount` (default 5, one
+ * per pentagon vertex - the same "vertex 0, 1, 2..." directions the old
+ * 5-thin-arm star used, so a future version can reuse the same rim
+ * connection points) rotated copies of `buildSpiralBand` and merges them
+ * into a single geometry - a pinwheel of wide, curling, constant-width
+ * blades instead of either 5 thin arms or 1 giant coil.
+ *
+ * @param {Face} face
+ * @param {object} [params] same as `buildSpiralBand` (`angleOffset` is set internally per arm and ignored if passed)
+ * @param {number} [params.armCount=5]
+ * @returns {{geometry: THREE.BufferGeometry, arms: Array<{geometry: THREE.BufferGeometry, points: THREE.Vector3[], metrics: object, armIndex: number}>}}
+ */
+export function buildSpiralStar(face, params = {}) {
+  const { armCount = 5, ...armParams } = params;
+
+  const arms = [];
+  const positions = [];
+  const indices = [];
+  let vOffset = 0;
+
+  for (let i = 0; i < armCount; i++) {
+    const angleOffset = (i * Math.PI * 2) / armCount;
+    const arm = buildSpiralBand(face, { ...armParams, angleOffset });
+    arms.push({ ...arm, armIndex: i });
+
+    const pos = arm.geometry.attributes.position.array;
+    for (let j = 0; j < pos.length; j++) positions.push(pos[j]);
+    const idx = arm.geometry.index.array;
+    for (let j = 0; j < idx.length; j++) indices.push(idx[j] + vOffset);
+    vOffset += pos.length / 3;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  return { geometry, arms };
 }
