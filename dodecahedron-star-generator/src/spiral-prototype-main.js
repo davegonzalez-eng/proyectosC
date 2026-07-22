@@ -116,6 +116,36 @@ bindSlider('bulgeStrength', 'bulgeStrength');
 bindSlider('tipDipStrength', 'tipDipStrength');
 bindSlider('surfTwistDeg', 'surfTwistDeg');
 
+// Scriptable hook for automated proportion sweeps (Playwright, etc.): merges
+// a partial params object, syncs the slider UI to match, and rebuilds - so
+// external tooling can drive this page the same way a person dragging
+// sliders would, without reimplementing the rebuild/label logic.
+window.__spiralProto = {
+  params,
+  setParams(partial) {
+    Object.assign(params, partial);
+    for (const key of Object.keys(partial)) {
+      const el = document.getElementById(key);
+      const label = document.getElementById(`v-${key}`);
+      if (el) el.value = partial[key];
+      if (label) label.textContent = partial[key];
+    }
+    rebuild();
+  },
+  // Screen-space (pixel) coordinates of the face's own pentagon corners
+  // under the current camera - lets external tooling (measurement scripts)
+  // build a mask of "the face's own area" from a screenshot, independent of
+  // whatever the band's own extent happens to be, to compute a real
+  // Surface Coverage Ratio instead of eyeballing it.
+  getPentagonScreenPoly() {
+    const rect = renderer.domElement.getBoundingClientRect();
+    return face.vertices3D.map((v) => {
+      const p = v.clone().project(camera);
+      return [((p.x + 1) / 2) * rect.width, ((1 - p.y) / 2) * rect.height];
+    });
+  },
+};
+
 rebuild();
 
 window.addEventListener('resize', () => {
