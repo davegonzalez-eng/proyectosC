@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Option B prototype — single spiral band</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #14161c; overflow: hidden; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; color: #e8e8ec; }
+    #scene-container { position: fixed; inset: 0; }
+    #scene-container canvas { display: block; }
+    #panel {
+      position: fixed;
+      top: 14px;
+      left: 14px;
+      width: 300px;
+      max-height: calc(100vh - 28px);
+      overflow-y: auto;
+      background: rgba(18, 20, 26, 0.88);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 14px;
+      backdrop-filter: blur(6px);
+      font-size: 12px;
+    }
+    #panel h1 { font-size: 14px; margin: 0 0 8px; }
+    #panel p.sub { margin: 0 0 12px; color: #9aa0ac; line-height: 1.4; }
+    .row { margin-bottom: 10px; }
+    .row label { display: flex; justify-content: space-between; margin-bottom: 3px; color: #c7cad1; }
+    .row input[type="range"] { width: 100%; }
+    #metrics { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); line-height: 1.6; color: #ffd27f; }
+  </style>
+</head>
+<body>
+  <div id="scene-container"></div>
+  <div id="panel">
+    <h1>Option B prototype: one wide spiral band</h1>
+    <p class="sub">A single face rendered in isolation, replacing the 5-thin-arm star with one constant-width logarithmic-spiral band ending in a terminal eye-hole. Not wired into the full dodecahedron yet.</p>
+
+    <div class="row"><label><span>Turns (spiral)</span><span id="v-turns">1.4</span></label><input id="turns" type="range" min="0.5" max="3" step="0.05" value="1.4"></div>
+    <div class="row"><label><span>Hole loop turns</span><span id="v-holeLoopTurns">0.85</span></label><input id="holeLoopTurns" type="range" min="0" max="2" step="0.05" value="0.85"></div>
+    <div class="row"><label><span>Hole radius / R_out</span><span id="v-rHoleFrac">0.16</span></label><input id="rHoleFrac" type="range" min="0.04" max="0.35" step="0.01" value="0.16"></div>
+    <div class="row"><label><span>Band half-width / R_out</span><span id="v-bandHalfWidth">0.22</span></label><input id="bandHalfWidth" type="range" min="0.05" max="0.4" step="0.01" value="0.22"></div>
+    <div class="row"><label><span>Loop-strand width fraction</span><span id="v-endHalfWidthFrac">0.32</span></label><input id="endHalfWidthFrac" type="range" min="0.05" max="1" step="0.01" value="0.32"></div>
+    <div class="row"><label><span>Thickness / R_out</span><span id="v-thickness">0.05</span></label><input id="thickness" type="range" min="0.01" max="0.12" step="0.005" value="0.05"></div>
+    <div class="row"><label><span>Bulge strength</span><span id="v-bulgeStrength">0.2</span></label><input id="bulgeStrength" type="range" min="0" max="0.6" step="0.01" value="0.2"></div>
+    <div class="row"><label><span>Tip-dip strength</span><span id="v-tipDipStrength">0.36</span></label><input id="tipDipStrength" type="range" min="0" max="0.8" step="0.01" value="0.36"></div>
+    <div class="row"><label><span>Surface twist (deg)</span><span id="v-surfTwistDeg">30</span></label><input id="surfTwistDeg" type="range" min="0" max="90" step="1" value="30"></div>
+
+    <div id="metrics"></div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.min.js"
+      }
+    }
+  </script>
+  <script type="module" src="./src/spiral-prototype-main.js"></script>
+</body>
+</html>

@@ -440,18 +440,83 @@ The chevron button in the panel's corner toggles a `.collapsed` class on
 the panel, hiding everything below the title/subtitle. Pure CSS/JS, no
 persistence across reloads.
 
+### 13. Option B prototype: one wide spiral band per face
+
+Reference photos of Bathsheba Grossman-style paisley/Voronoi lamps show a
+much lower-density structure than the current 60-thin-arm lattice: roughly
+5-6 dominant, continuous, constant-width bands, each curling in a tight
+logarithmic spiral that closes into a small round terminal eye-hole,
+covering ~75-85% of the visible surface with no visible seams. Tuning the
+existing 5-thin-arm-per-face star's parameters can't reach that - it's a
+different topology, not a different parameter setting.
+
+`src/spiralarm.js` (a **new, separate module** - `geometry.js`/`startube.js`
+are untouched, kept as the current fallback/reference) prototypes the
+replacement motif for a single face in isolation:
+
+- **Centerline**: a logarithmic spiral `r(theta) = r0 * exp(-k*theta)` in
+  the face's local `(u, w)` plane, starting at the rim (`theta = 0`, in the
+  same "vertex 0" direction the old arm 0's tip used, so a future version
+  can reuse the existing connection machinery) and spiraling inward over
+  `turns` full turns down to a small `rHoleFrac * R_out` radius. Past that
+  point the path continues at that constant radius for `holeLoopTurns` more
+  turns before ending, closing a loop.
+- **Cross-section**: built the same way `startube.js` orients its
+  flattened cut ends - `major = cross(tangent, radial-from-sphere-center)`,
+  `minor = cross(tangent, major)` - so the band lies flat against the
+  sphere's surface along its whole length, not just at its endpoints.
+  Extruded into a real slab (top/bottom/2 side walls + 2 end caps), reusing
+  the station-based extrusion technique from `ribbon.js`.
+- **Width taper**: mostly constant (matching the reference's constant-width
+  bands), tapering up from a thinner cross-section at the rim attachment
+  point (`t=0`, for a future seam with a neighboring face), and tapering
+  *down* to a thin strand (`endHalfWidthFrac` of the main width) before
+  entering the closing hole loop - without that taper, the wide band's
+  swept width simply overlaps its own center and the "hole" fills in
+  solid. The taper's position is computed from actual arc length, not the
+  spiral's own `theta` parameter, since arc length per radian shrinks
+  sharply toward the tight inner turns.
+- Same distortion language as the rest of the sculpture (`applySurfaceTwist`,
+  `applyTipDip` from `geometry.js`, unmodified) is applied to the
+  centerline points, so this motif would sit on the same surface language
+  as the current one if wired in later.
+
+`spiral-prototype.html` / `src/spiral-prototype-main.js` render exactly one
+face - the new band plus a wireframe outline of the pentagon it fills, and
+nothing else from the rest of the app - with live sliders for every shape
+parameter, so the motif can be judged (and the metrics below re-measured)
+without touching the main scene.
+
+Checked standalone under Node: zero NaN/Infinity across the slab's ~1900
+vertices; with distortion disabled, the raw centerline's rim point and
+loop-tail point land at their exact target radii (`tipScale * R_out` and
+`rHoleFrac * R_out`) with zero deviation. Checked in headless Chromium:
+zero console errors; straight-on view (camera along the face normal) shows
+one continuous wide band spiraling from the rim to an open round terminal
+hole - not a solid disc and not 5 separate thin arms.
+
+This is a single-face prototype only - not yet wired into the 12-face,
+60-connection sculpture. That wiring (deciding how this motif's single
+rim-attachment point per face relates to the existing 5-connections-per-face
+adjacency rule, then replacing every face's star + fill with this band)
+is the next step, pending a read on whether this shape is the right
+direction before that larger effort.
+
 ## File layout
 
 ```
-index.html            page shell, collapsible control panel, import map
-src/geometry.js        dodecahedron construction, per-face star math, adjacency-connection rule
-src/ribbon.js          spline-based ribbon geometry (precise dip depth + tangent-matched joins) between two arm tips
-src/startube.js         star tube cut short of every tip (5 open segments, flat cut edges the ribbons fuse into)
-src/membrane.js         thin triangulated fill surface for a star's interior
-src/hexgrid.js           clipped hexagonal-grid fill surface for a star's interior
-src/hextexture.js        procedural tileable hex-pattern canvas texture, applied as a bump map on ribbons
-src/main.js             Three.js scene, materials/environment, UI wiring, labels, picking, render loop
-vendor/three/           vendored Three.js build + OrbitControls + CSS2DRenderer + RoomEnvironment (no CDN/network dependency)
+index.html                    page shell, collapsible control panel, import map
+spiral-prototype.html         Option B prototype: single face, standalone viewer (§13)
+src/geometry.js                dodecahedron construction, per-face star math, adjacency-connection rule
+src/ribbon.js                  spline-based ribbon geometry (precise dip depth + tangent-matched joins) between two arm tips
+src/startube.js                 star tube cut short of every tip (5 open segments, flat cut edges the ribbons fuse into)
+src/membrane.js                 thin triangulated fill surface for a star's interior
+src/hexgrid.js                   clipped hexagonal-grid fill surface for a star's interior
+src/hextexture.js                procedural tileable hex-pattern canvas texture, applied as a bump map on ribbons
+src/spiralarm.js                 Option B prototype: single wide logarithmic-spiral band per face (§13), not yet wired into main.js
+src/spiral-prototype-main.js     scene/UI for spiral-prototype.html
+src/main.js                     Three.js scene, materials/environment, UI wiring, labels, picking, render loop
+vendor/three/                   vendored Three.js build + OrbitControls + CSS2DRenderer + RoomEnvironment (no CDN/network dependency)
 ```
 
 ## Verified
