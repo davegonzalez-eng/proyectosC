@@ -891,182 +891,103 @@ export function buildStarRim(star2D, face, params = {}) {
 }
 
 /**
- * A connector that CONTINUES an arm rather than reading as a separate
- * ribbon - now built as a calligraphic HAIRPIN rather than a single smooth
- * bridge, after the reference showed a family of cursive loop strokes
- * (down-stroke -> tight U-turn -> up-stroke). Two analytic, tangent-matched
- * pieces:
+ * "Circular horn triangle" connector. The adjacency rule's 60 pairs chain
+ * into exactly 20 closed 3-cycles - one per dodecahedron vertex, where
+ * three faces (and so three arm tips) meet. Drawing ONE arc per pair
+ * therefore assembles, with no extra bookkeeping, 20 curved triangles
+ * whose edges bow like the reference deltoid: each side sweeps from one
+ * tip to the next, hugging the silhouette of the star arm it passes.
  *
- *  1. THE LOOP - a circular arc in the plane spanned by arm A's own
- *     outward tangent (T0) and the "major" in-surface direction
- *     perpendicular to it (B0 = cross(T0, radial)). It starts at the tip
- *     moving along T0 (continuing the arm's own direction, the
- *     "down-stroke"), sweeps `loopSweepDeg` (default 200, comfortably
- *     under a full turn - "<2 full turns" for the whole connector was the
- *     brief, and the twist ramp below is separately capped the same way),
- *     and exits pointing roughly back the way it came, offset sideways by
- *     up to 2x its radius - the hairpin. Sized off `halfWidth` (the tip's
- *     own cross-section, i.e. right where the material is anchored/thick)
- *     rather than a fixed world size, and clamped against the total span
- *     so it can't dwarf a short connection.
- *  2. THE BRIDGE - the same Hermite curve as before, but starting from the
- *     loop's exit point/tangent instead of the raw tip, continuing to arm
- *     B's tip.
+ * One arc = a Hermite curve whose end tangents are the ARMS' OWN tip
+ * tangents: it leaves tip A along A's outward direction and arrives at
+ * tip B against B's outward direction. That gives the two properties the
+ * shape needs at once - (1) at every tip the two incident arcs and the
+ * arm itself all share one tangent line, forming the horn triangle's
+ * cusp while staying G1-continuous with the arm surface, and (2) since
+ * each neighboring arm's edge leaves its own tip in that same direction,
+ * the arc's launch runs parallel to the arm beside it before bending
+ * across the gap. `lengthFactor` scales the tangent magnitudes: larger
+ * values keep the arc parallel to the arms longer / bow it deeper.
  *
- * Both pieces share one continuous tangent field (the bridge's Hermite
- * tangent at t=0 is built FROM the loop's exit tangent), so the
- * cross-section frame (major = cross(tangent, sphere-radial), same
- * convention as the rest of this file) and the eased twist ramp stay
- * seamless across the loop/bridge seam. The mid-span inward dip
- * (`depthFraction`) still applies over the connector's overall parameter
- * so the bridge still passes under whatever it crosses, same as before.
+ * Rendered as a slim bead - an elliptical tube sized off the rim's own
+ * width and proud height (and meant to be drawn with the rim's material)
+ * so the triangles read as the rim pattern continuing across the gaps
+ * rather than as structural ribbon. A mild radial squash (`depthFraction`)
+ * keeps the mid-span from ballooning off the sphere.
  */
-export function buildArmExtension(tipA, tipB, options = {}) {
+export function buildHornArc(tipA, tipB, options = {}) {
   const {
-    halfWidth = 0.05,
-    halfThickness = 0.01,
-    lengthFactor = 0.62,
-    twistDeg = 180,
-    depthFraction = 0.92,
-    segments = 40,
-    loopRadiusFactor = 3.5,
-    loopSweepDeg = 200,
-    loopTFraction = 0.3,
+    arcWidth = 0.04,    // full in-surface width of the bead
+    arcHeight = 0.04,   // full radial height of the bead
+    lengthFactor = 0.55,
+    depthFraction = 0.95,
+    segments = 48,
+    radialSegments = 10,
   } = options;
 
   const P0 = tipA.tipPosition.clone();
   const P1 = tipB.tipPosition.clone();
-  const T0 = tipA.tipTangent.clone().normalize();
-  const T1 = tipB.tipTangent.clone().normalize();
   const span = P0.distanceTo(P1);
+  const m0 = tipA.tipTangent.clone().multiplyScalar(span * lengthFactor);
+  const m1 = tipB.tipTangent.clone().multiplyScalar(-span * lengthFactor);
 
-  const radial0 = P0.clone().normalize();
-  const B0 = new THREE.Vector3().crossVectors(T0, radial0);
-  if (B0.lengthSq() < 1e-10) B0.set(1, 0, 0);
-  B0.normalize();
-
-  // Clamp so the loop never dwarfs a short connection: at most 35% of the
-  // straight-line span, even if `loopRadiusFactor * halfWidth` is large.
-  const loopRadius = Math.min(halfWidth * loopRadiusFactor, span * 0.35);
-  const loopCenter = P0.clone().addScaledVector(B0, loopRadius);
-  const sweepRad = THREE.MathUtils.degToRad(loopSweepDeg);
-
-  // Circle through P0 with initial tangent T0: phi=0 lands exactly on P0.
-  const loopPoint = (phi) =>
-    loopCenter.clone()
-      .addScaledVector(B0, -loopRadius * Math.cos(phi))
-      .addScaledVector(T0, loopRadius * Math.sin(phi));
-  const loopTangent = (phi) =>
-    T0.clone().multiplyScalar(Math.cos(phi)).addScaledVector(B0, Math.sin(phi)).normalize();
-
-  const loopExitPoint = loopPoint(sweepRad);
-  const loopExitTangent = loopTangent(sweepRad);
-
-  const bridgeSpan = loopExitPoint.distanceTo(P1);
-  const m0 = loopExitTangent.clone().multiplyScalar(bridgeSpan * lengthFactor);
-  const m1 = T1.clone().multiplyScalar(-bridgeSpan * lengthFactor);
   const hermite = (t) => {
     const t2 = t * t, t3 = t2 * t;
     return new THREE.Vector3()
-      .addScaledVector(loopExitPoint, 2 * t3 - 3 * t2 + 1)
+      .addScaledVector(P0, 2 * t3 - 3 * t2 + 1)
       .addScaledVector(m0, t3 - 2 * t2 + t)
       .addScaledVector(P1, -2 * t3 + 3 * t2)
       .addScaledVector(m1, t3 - t2);
   };
-
-  const loopSegCount = Math.max(4, Math.round(segments * loopTFraction));
-  const bridgeSegCount = Math.max(4, segments - loopSegCount);
-
-  // Raw centerline: {point, tangent, t} with t in [0,1] over the WHOLE
-  // connector (loop then bridge), analytic in both pieces so tangents stay
-  // exact (no finite-difference noise) and continuous across the seam.
-  const raw = [];
-  for (let i = 0; i <= loopSegCount; i++) {
-    const tt = i / loopSegCount;
-    const phi = sweepRad * tt;
-    raw.push({ point: loopPoint(phi), tangent: loopTangent(phi), t: tt * loopTFraction });
-  }
-  for (let i = 1; i <= bridgeSegCount; i++) {
-    const tt = i / bridgeSegCount;
-    const p = hermite(tt);
-    const tangent = hermite(Math.min(tt + 1e-3, 1)).sub(hermite(Math.max(tt - 1e-3, 0))).normalize();
-    raw.push({ point: p, tangent, t: loopTFraction + tt * (1 - loopTFraction) });
-  }
-
-  const baseR0 = P0.length();
-  const baseR1 = P1.length();
-  const twistRad = THREE.MathUtils.degToRad(twistDeg);
-
-  const stations = [];
-  let arc = 0;
-  let prevPt = null;
-  for (const { point, tangent, t } of raw) {
-    // Mid-span dip toward the sphere center, same as before: peaks at the
-    // overall midpoint, vanishes at both true endpoints, so it doesn't
-    // distort the loop (which lives near t=0) but still pulls the bridge
-    // under whatever it crosses.
-    const baseR = THREE.MathUtils.lerp(baseR0, baseR1, t);
+  // Blend toward `depthFraction` of the endpoints' radius mid-span (sin
+  // profile, zero at both ends so the cusps stay exactly ON the tips).
+  const pointAt = (t) => {
+    const p = hermite(t);
+    const baseR = THREE.MathUtils.lerp(P0.length(), P1.length(), t);
     const target = baseR * THREE.MathUtils.lerp(1, depthFraction, Math.sin(Math.PI * t));
-    const len = point.length();
-    const p = len > 1e-9 ? point.clone().multiplyScalar(target / len) : point.clone();
+    const len = p.length();
+    if (len > 1e-9) p.multiplyScalar(target / len);
+    return p;
+  };
 
-    const radial = p.clone().normalize();
-    let major = new THREE.Vector3().crossVectors(tangent, radial);
-    if (major.lengthSq() < 1e-10) major.set(1, 0, 0);
-    major.normalize();
-    let minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
-    // Eased (smoothstep) rather than linear in t: the twist RATE is zero
-    // at both ends, matching the flat, untwisted star sheet the extension
-    // leaves from and arrives at - a linear ramp starts twisting at full
-    // rate immediately at the seam, which is exactly the visible kink/
-    // crease the connection had.
-    const easeT = t * t * (3 - 2 * t);
-    const phi = twistRad * easeT;
-    const c = Math.cos(phi), s = Math.sin(phi);
-    const majorR = major.clone().multiplyScalar(c).addScaledVector(minor, s);
-    const minorR = new THREE.Vector3().crossVectors(tangent, majorR).normalize();
-    if (prevPt) arc += p.distanceTo(prevPt);
-    prevPt = p;
-    stations.push({
-      topA: p.clone().addScaledVector(majorR, halfWidth).addScaledVector(minorR, halfThickness),
-      topB: p.clone().addScaledVector(majorR, -halfWidth).addScaledVector(minorR, halfThickness),
-      botA: p.clone().addScaledVector(majorR, halfWidth).addScaledVector(minorR, -halfThickness),
-      botB: p.clone().addScaledVector(majorR, -halfWidth).addScaledVector(minorR, -halfThickness),
-      arc,
-    });
-  }
-
-  const segCount = stations.length - 1;
+  const a = arcWidth / 2;
+  const b = arcHeight / 2;
   const positions = [];
   const uvs = [];
   const indices = [];
-  const addStrip = (vertPair, vPair) => {
-    const vbase = positions.length / 3;
-    for (let i = 0; i <= segCount; i++) {
-      const s2 = stations[i];
-      const [va, vb] = vertPair(s2);
-      positions.push(va.x, va.y, va.z, vb.x, vb.y, vb.z);
-      uvs.push(s2.arc, vPair[0], s2.arc, vPair[1]);
-    }
-    for (let i = 0; i < segCount; i++) {
-      const a = vbase + i * 2, b = a + 1, c2 = vbase + (i + 1) * 2, d = c2 + 1;
-      indices.push(a, c2, b, b, c2, d);
-    }
-  };
-  addStrip((s2) => [s2.topA, s2.topB], [halfWidth, -halfWidth]);
-  addStrip((s2) => [s2.botB, s2.botA], [-halfWidth, halfWidth]);
-  addStrip((s2) => [s2.topA, s2.botA], [0, halfThickness]);
-  addStrip((s2) => [s2.botB, s2.topB], [0, halfThickness]);
 
-  const pushCap = (station, flip) => {
-    const vbase = positions.length / 3;
-    const verts = [station.topA, station.topB, station.botB, station.botA];
-    for (const v of verts) { positions.push(v.x, v.y, v.z); uvs.push(0, 0); }
-    if (!flip) indices.push(vbase, vbase + 1, vbase + 2, vbase, vbase + 2, vbase + 3);
-    else indices.push(vbase, vbase + 2, vbase + 1, vbase, vbase + 3, vbase + 2);
-  };
-  pushCap(stations[0], false);
-  pushCap(stations[segCount], true);
+  let arcLen = 0;
+  let prevPt = null;
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const p = pointAt(t);
+    const tangent = pointAt(Math.min(t + 1e-3, 1)).sub(pointAt(Math.max(t - 1e-3, 0))).normalize();
+    const radial = p.clone().normalize();
+    const major = new THREE.Vector3().crossVectors(tangent, radial);
+    if (major.lengthSq() < 1e-10) major.set(1, 0, 0);
+    major.normalize();
+    const minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
+    if (prevPt) arcLen += p.distanceTo(prevPt);
+    prevPt = p;
+    // Elliptical ring: wide in-surface (major), shallow radially (minor) -
+    // the same rounded-bead proportions as the rim's sin-profile cross
+    // section, just closed all the way around.
+    for (let k = 0; k <= radialSegments; k++) {
+      const phi = (k / radialSegments) * Math.PI * 2;
+      const v = p.clone()
+        .addScaledVector(major, a * Math.cos(phi))
+        .addScaledVector(minor, b * Math.sin(phi));
+      positions.push(v.x, v.y, v.z);
+      uvs.push(arcLen, (k / radialSegments) * arcWidth);
+    }
+  }
+  const ring = radialSegments + 1;
+  for (let i = 0; i < segments; i++) {
+    for (let k = 0; k < radialSegments; k++) {
+      const s0 = i * ring + k, s1 = s0 + 1, s2 = s0 + ring, s3 = s2 + 1;
+      indices.push(s0, s2, s1, s1, s2, s3);
+    }
+  }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));

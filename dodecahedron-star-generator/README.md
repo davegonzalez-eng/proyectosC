@@ -1025,6 +1025,52 @@ Defaults updated to the user's latest tuned screenshot: `starRotationDeg=27`,
 `extTwistDeg=-195`, `material='matteClay'`, `lampMode=true`,
 `lampIntensity=19`.
 
+## 19. Horn-triangle connectors replace the hairpin extensions
+
+The hairpin approach (§18) is scrapped. The reference this time was a
+"circular horn triangle" - a deltoid-like figure of three concave arcs
+meeting at sharp cusps - to be drawn at rim width, in the rim's texture,
+with the smoothest possible junction to the arms.
+
+The key discovery making this almost free: the adjacency rule's 60
+connection pairs chain into exactly **20 closed 3-cycles, one per
+dodecahedron vertex** (verified under Node: 20 cycles, every length 3 -
+e.g. `F0-A0 -> F5-A3 -> F11-A2 -> back`). Three faces meet at each
+dodecahedron vertex, so three arm tips converge near it, and the
+existing rule already groups precisely those three tips. Drawing ONE arc
+per pair therefore assembles the 20 horn triangles with no new
+bookkeeping at all.
+
+`buildHornArc` (replacing `buildArmExtension`, which is deleted along
+with its twist/loop machinery): a Hermite curve whose end tangents are
+the arms' own tip tangents - leaving tip A along A's outward direction,
+arriving at tip B against B's. This yields the two wanted properties at
+once: at every tip the two incident arcs and the arm itself share one
+tangent line (the horn triangle's cusp, G1-continuous with the arm - the
+worst launch-direction deviation measured across all 60 arcs is 0.47°,
+i.e. finite-difference noise), and each arc's launch runs parallel to
+the neighboring arm's edge before bending across the gap, since that
+edge leaves its own tip in the same direction. `extLengthFactor`
+(default 0.55) scales the tangent magnitudes - larger keeps arcs
+parallel to the arms longer and bows the triangle sides deeper.
+
+Rendering: an elliptical tube sized off the rim (`arcWidth = 2 *
+rimWidthFrac * R * extArcWidthFactor`, `arcHeight = 2 * rimProudFrac *
+R`), drawn with `rimMaterial` - the never-perforated rim finish - so the
+triangles read as the rim bead continuing off the arm tips across the
+gaps. A mild radial squash (`extDepthFraction`, sin-profiled so it is
+exactly zero at the cusps) keeps mid-spans from ballooning; the raw
+Hermite mid-points already sit at ~0.986 of the endpoint radius, so the
+arcs naturally hug the sphere. Panel section reduced to three sliders:
+arc bow, arc depth fraction, arc width (x rim width); `showExtensions`
+defaults back on since the triangles are the point.
+
+Checked standalone under Node (60 arcs, ~32k vertices): zero
+NaN/Infinity, cusp continuity as above. Checked in headless Chromium
+with the stars hidden: 20 clean concave-sided triangles with sharp
+cusps, matching the reference figure; with stars visible they sit in the
+three-face gaps at rim scale.
+
 ## File layout
 
 ```

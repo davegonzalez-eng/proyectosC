@@ -22,7 +22,7 @@ import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from '../vendor/three/CSS2DRenderer.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, buildArmExtension, buildStarRim } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, buildHornArc, buildStarRim } from './spiralarm.js';
 import { createPerforationTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -199,15 +199,15 @@ const params = {
   tipBendStrength: 0.12,
   tipBendTwistDeg: 37,
   tipBendPower: 5,
-  // Connections: arm extensions, a calligraphic hairpin (loop near the
-  // tip, then a bridge to the target tip) rather than a single smooth arc.
-  showExtensions: false,
-  extTwistDeg: 0,
-  extLengthFactor: 0.15,
+  // Connections: "circular horn triangles" - the adjacency rule's 60
+  // pairs chain into 20 closed 3-cycles (one per dodecahedron vertex), so
+  // one tangent-matched arc per pair assembles 20 deltoid-like curved
+  // triangles whose sides run parallel to the star arms they pass,
+  // rendered as slim beads in the rim's own width/material.
+  showExtensions: true,
+  extLengthFactor: 0.55,
   extDepthFraction: 0.95,
-  extLoopRadiusFactor: 1,
-  extLoopSweepDeg: 180,
-  extLoopTFraction: 0.1,
+  extArcWidthFactor: 1,
   // Rim bead tracing every boundary edge (outer silhouette + gaps),
   // like the earlier Quin study's RIM_W/RIM_PROUD.
   showRim: true,
@@ -312,8 +312,6 @@ function rebuild() {
   }
 
   const R = faces[0].R_out;
-  const tipHalfWidth = R * params.bandHalfWidth * params.tipWidthFrac;
-  const tipHalfThickness = (R * params.thickness * params.tipThicknessFrac) / 2;
 
   let missing = 0;
   if (params.showExtensions) {
@@ -324,17 +322,16 @@ function rebuild() {
         missing++;
         continue;
       }
-      const { geometry } = buildArmExtension(tipA, tipB, {
-        halfWidth: tipHalfWidth,
-        halfThickness: tipHalfThickness,
+      // Sized off the rim, drawn with the rim's (never-perforated)
+      // material: the horn triangles read as the rim bead continuing off
+      // the arm tips across the gaps, not as separate structural ribbon.
+      const { geometry } = buildHornArc(tipA, tipB, {
+        arcWidth: R * params.rimWidthFrac * params.extArcWidthFactor * 2,
+        arcHeight: R * Math.max(params.rimProudFrac, 0.005) * 2,
         lengthFactor: params.extLengthFactor,
-        twistDeg: params.extTwistDeg,
         depthFraction: params.extDepthFraction,
-        loopRadiusFactor: params.extLoopRadiusFactor,
-        loopSweepDeg: params.extLoopSweepDeg,
-        loopTFraction: params.extLoopTFraction,
       });
-      extGroup.add(new THREE.Mesh(geometry, sculptureMaterial));
+      extGroup.add(new THREE.Mesh(geometry, rimMaterial));
     }
   }
 
@@ -386,12 +383,9 @@ bindSlider('subdivisions', 'subdivisions');
 bindSlider('tipBendStrength', 'tipBendStrength');
 bindSlider('tipBendTwistDeg', 'tipBendTwistDeg');
 bindSlider('tipBendPower', 'tipBendPower');
-bindSlider('extTwistDeg', 'extTwistDeg');
 bindSlider('extLengthFactor', 'extLengthFactor');
 bindSlider('extDepthFraction', 'extDepthFraction');
-bindSlider('extLoopRadiusFactor', 'extLoopRadiusFactor');
-bindSlider('extLoopSweepDeg', 'extLoopSweepDeg');
-bindSlider('extLoopTFraction', 'extLoopTFraction');
+bindSlider('extArcWidthFactor', 'extArcWidthFactor');
 bindSlider('rimWidthFrac', 'rimWidthFrac');
 bindSlider('rimProudFrac', 'rimProudFrac');
 bindSlider('holeSize', 'holeSize', { appearanceOnly: true });
