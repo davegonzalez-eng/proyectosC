@@ -825,6 +825,65 @@ weaving); matte white + coral reads as porous coral/bone; labels default
 off and toggle correctly (the vendored CSS2DRenderer ignores ancestor
 visibility, so the toggle sets each label's own).
 
+## 16. Smoothing the arm/extension seam, denser mesh, a rim bead
+
+Three more fixes on the same page, plus adopting the user's own tuned
+parameters as the new defaults.
+
+**Eased twist at the connection.** `buildArmExtension`'s cross-section
+twist was linear in `t` (`phi = twistDeg * t`), so its twist *rate* jumped
+from zero (the flat, untwisted star sheet it leaves) to full rate right
+at the seam - a visible kink. Changed to `phi = twistDeg *
+smoothstep(t)` (`t*t*(3-2t)`): the rate is now zero at both `t=0` and
+`t=1`, matching the flat sheet on both ends of the connection. (The
+arms themselves have no separate twistable cross-section to pre-twist -
+in this solid-sheet construction an arm is just part of one continuous
+2D field, not an extruded path like the old per-arm slabs - so the fix
+had to live entirely in the extension's own profile; that turned out to
+be sufficient.)
+
+**Smoother star surface.** The "bolted-plate" look was a real
+resolution problem, not a shading bug: `computeVertexNormals()` already
+gives correct Gouraud shading, but `earcut` triangulates a polygon using
+*only* its boundary points (no interior Steiner points), so the fan of
+triangles crossing open interior areas is large and flat between
+subdivision rounds - the mesh genuinely doesn't bend there, no matter how
+smooth the shading. Raised `subdivisions`' default from 2 to 3 (each
+round quarters every triangle) and exposed it as a "Mesh detail" slider.
+Cost is real (2D triangulation ~340ms once, but mapping 12 faces + 12
+rims now ~4.2s combined) - acceptable for a rebuild-on-change prototype,
+not for per-frame slider dragging, so this is a deliberate trade-off
+rather than something to chase further without a smarter interior
+tessellation (e.g. seeding earcut with interior grid points).
+
+**Rim bead.** `buildStarRim()`: a raised bead traces every boundary loop
+of the solid star - the outer silhouette *and* every internal gap edge -
+cross-section height `0 -> rimProudFrac*R -> 0` across `rimWidthFrac*R`
+inward (`sin(pi*s)` profile, a rounded bead rather than a hard step) so
+it sits flush with the sheet at both its true edge and where it rejoins
+the interior, with a visible raised lip in between - the same idea as
+the earlier Quin study's `RIM_W`/`RIM_PROUD`. The inward 2D direction at
+each boundary point comes from the triangulation itself (the third
+vertex of whichever triangle owns that edge tells us which side has
+material), not a naive centroid guess, so it's correct regardless of
+local convexity/concavity.
+
+Defaults updated to the user's own tuned values: `starRotationDeg=24`,
+`tipScale=1.28`, `bandHalfWidth=0.24`, `tipWidthFrac=0.44`,
+`widthTaperPower=0.8`, `tipThicknessFrac=0.17`, `bulgeStrength=0.23`,
+`tipDipStrength=0.32`, `surfTwistDeg=-45`, `extTwistDeg=-210`,
+`extLengthFactor=0.38`, `extDepthFraction=0.85`, `holeSize=0.21`,
+`patternScale=3.2`.
+
+Checked standalone under Node: zero NaN/Infinity across ~827k star
+vertices, ~1.02M rim vertices, 60/60 extensions (all at the new
+defaults, subdivisions=3). Checked in headless Chromium: zero console
+errors (aside from expected software-rendering GPU-stall warnings from
+the headless environment, not app errors); the arm-to-extension seam
+reads as one continuous surface rather than a kink; the star's dome
+faces read smooth rather than faceted; the rim gives every edge -
+outline and internal gaps alike - a defined, crafted border.
+
 ## File layout
 
 ```

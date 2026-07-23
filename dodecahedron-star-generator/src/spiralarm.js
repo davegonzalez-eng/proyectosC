@@ -346,7 +346,7 @@ function smin(a, b, k) {
  * @param {number} [params.filletFrac=0.06] smooth-union fillet radius between arms/hub, as a fraction of R_out
  * @param {number} [params.fieldGrid=144] marching-squares grid resolution
  * @param {number} [params.armSamples=48] centerline samples per arm
- * @param {number} [params.subdivisions=2] midpoint-subdivision rounds after triangulation
+ * @param {number} [params.subdivisions=3] midpoint-subdivision rounds after triangulation - earcut triangulates using ONLY boundary points (no interior Steiner points), so its interior triangles fanning across open areas are large/flat; each round quarters them. Cheap in isolation (this whole function runs once, shared across all faces) but the resulting vertex count is what mapSolidStarToFace pays 12x for, so this is the main perf/smoothness dial
  * @param {number} R face circumradius (face.R_out - identical for all faces)
  * @returns 2D star mesh: {positions: [x,y,...], indices, boundaryNext: Map, tips2D: [{tip, prev}], R}
  */
@@ -364,7 +364,7 @@ export function buildSolidStar2D(params, R) {
     capRadiusFrac,
     fieldGrid = 144,
     armSamples = 48,
-    subdivisions = 2,
+    subdivisions = 3,
   } = params;
 
   const rot = THREE.MathUtils.degToRad(starRotationDeg);
@@ -702,6 +702,138 @@ export function mapSolidStarToFace(star2D, face, params = {}) {
 }
 
 /**
+ * A raised bead tracing every boundary loop of the solid star (outer
+ * silhouette AND every gap/hole edge) - the smooth-shaded field-based sheet
+ * on its own reads as a flat cutout; a defined rim/bezel along every edge
+ * is what the earlier Quin raymarched study's RIM_W/RIM_PROUD gave it.
+ *
+ * Cross-section per boundary point: height 0 at the true edge, rising to
+ * `rimProudFrac * R` at `rimWidthFrac * R` inward, back to flush with the
+ * sheet beyond that (`sin(pi * s)` profile) - a rounded bead sitting proud
+ * of the surface, not a hard step. The inward 2D direction at each
+ * boundary point comes from the triangulation itself (the third vertex of
+ * whichever triangle owns that edge tells us which side has material) so
+ * it's correct regardless of how convex/concave the local boundary is.
+ *
+ * @param {ReturnType<typeof buildSolidStar2D>} star2D
+ * @param {Face} face
+ * @param {object} [params] same thickness/bulge/twist params as `mapSolidStarToFace`, plus:
+ * @param {number} [params.rimWidthFrac=0.02] rim width, fraction of R_out
+ * @param {number} [params.rimProudFrac=0.025] how far the rim's peak stands proud of the sheet, fraction of R_out
+ * @param {number} [params.rimCrossSamples=4] cross-section resolution
+ * @returns {THREE.BufferGeometry}
+ */
+export function buildStarRim(star2D, face, params = {}) {
+  const {
+    thickness = 0.015,
+    bulgeStrength = 0,
+    tipDipStrength = 0,
+    surfTwistDeg = 0,
+    rimWidthFrac = 0.02,
+    rimProudFrac = 0.025,
+    rimCrossSamples = 4,
+  } = params;
+
+  const R = star2D.R;
+  const surfTwistRad = THREE.MathUtils.degToRad(surfTwistDeg);
+  const halfT = (R * thickness) / 2;
+  const rimWidth = R * rimWidthFrac;
+  const rimProud = R * rimProudFrac;
+  const eps = R * 1e-3;
+
+  const place = (u, w) => {
+    const r = Math.hypot(u, w);
+    const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
+    const world = face.center.clone().add(applySurfaceTwist(face, u, w, bulge, surfTwistRad));
+    applyTipDip(world, r, face, tipDipStrength);
+    return world;
+  };
+
+  const idx = star2D.indices;
+  const edgeThird = new Map();
+  for (let t = 0; t < idx.length; t += 3) {
+    const tri = [idx[t], idx[t + 1], idx[t + 2]];
+    for (let e = 0; e < 3; e++) {
+      const a = tri[e], b = tri[(e + 1) % 3], c = tri[(e + 2) % 3];
+      const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+      if (!edgeThird.has(key)) edgeThird.set(key, c);
+    }
+  }
+  const pos2 = star2D.positions;
+  const inward = new Map();
+  for (const [a, b] of star2D.boundaryNext) {
+    const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+    const c = edgeThird.get(key);
+    if (c === undefined) continue;
+    const ax = pos2[a * 2], ay = pos2[a * 2 + 1];
+    const bx = pos2[b * 2], by = pos2[b * 2 + 1];
+    const cx = pos2[c * 2], cy = pos2[c * 2 + 1];
+    const ex = bx - ax, ey = by - ay;
+    const elen = Math.hypot(ex, ey) || 1;
+    let nx = -ey / elen, ny = ex / elen;
+    if ((cx - ax) * nx + (cy - ay) * ny < 0) { nx = -nx; ny = -ny; }
+    for (const p of [a, b]) {
+      if (!inward.has(p)) inward.set(p, { x: 0, y: 0 });
+      const v = inward.get(p);
+      v.x += nx;
+      v.y += ny;
+    }
+  }
+  for (const v of inward.values()) {
+    const len = Math.hypot(v.x, v.y) || 1;
+    v.x /= len;
+    v.y /= len;
+  }
+
+  const csCache = new Map();
+  const crossSection = (i) => {
+    if (csCache.has(i)) return csCache.get(i);
+    const u = pos2[i * 2], w = pos2[i * 2 + 1];
+    const dir = inward.get(i) || { x: 0, y: 0 };
+    const n = new THREE.Vector3()
+      .crossVectors(
+        place(u + eps, w).sub(place(u - eps, w)),
+        place(u, w + eps).sub(place(u, w - eps))
+      )
+      .normalize();
+    if (n.dot(face.normal) < 0) n.negate();
+    const stations = [];
+    for (let k = 0; k <= rimCrossSamples; k++) {
+      const s = k / rimCrossSamples;
+      const uu = u + dir.x * rimWidth * s;
+      const ww = w + dir.y * rimWidth * s;
+      const proud = halfT + rimProud * Math.sin(Math.PI * s);
+      stations.push(place(uu, ww).addScaledVector(n, proud));
+    }
+    csCache.set(i, stations);
+    return stations;
+  };
+
+  const positions = [];
+  const indices = [];
+  const pushVert = (p) => positions.push(p.x, p.y, p.z);
+
+  for (const [a, b] of star2D.boundaryNext) {
+    const csA = crossSection(a);
+    const csB = crossSection(b);
+    for (let k = 0; k < rimCrossSamples; k++) {
+      const base = positions.length / 3;
+      pushVert(csA[k]);
+      pushVert(csA[k + 1]);
+      pushVert(csB[k]);
+      pushVert(csB[k + 1]);
+      indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
  * A connector that CONTINUES an arm rather than reading as a separate
  * ribbon: a Hermite curve from arm A's tip (leaving along A's own outward
  * tangent) to arm B's tip (arriving against B's outward tangent), extruded
@@ -757,7 +889,13 @@ export function buildArmExtension(tipA, tipB, options = {}) {
     if (major.lengthSq() < 1e-10) major.set(1, 0, 0);
     major.normalize();
     let minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
-    const phi = twistRad * t;
+    // Eased (smoothstep) rather than linear in t: the twist RATE is zero
+    // at both ends, matching the flat, untwisted star sheet the extension
+    // leaves from and arrives at - a linear ramp starts twisting at full
+    // rate immediately at the seam, which is exactly the visible kink/
+    // crease the connection had.
+    const easeT = t * t * (3 - 2 * t);
+    const phi = twistRad * easeT;
     const c = Math.cos(phi), s = Math.sin(phi);
     const majorR = major.clone().multiplyScalar(c).addScaledVector(minor, s);
     const minorR = new THREE.Vector3().crossVectors(tangent, majorR).normalize();

@@ -22,7 +22,7 @@ import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from '../vendor/three/CSS2DRenderer.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, buildArmExtension } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, buildArmExtension, buildStarRim } from './spiralarm.js';
 import { createPerforationTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -114,37 +114,42 @@ const faces = buildDodecahedron(RADIUS);
 const connections = computeAdjacentFaceConnections(faces);
 
 const params = {
-  // Star shape (blend of this project's spiral-curl arms + the hex-web
-  // study's locked settings where they map).
-  starRotationDeg: 23,
-  tipScale: 1.05,
+  // Star shape - user's preferred settings from the live panel.
+  starRotationDeg: 24,
+  tipScale: 1.28,
   turns: 0.1,
   hubRadiusFrac: 0.02,
-  bandHalfWidth: 0.25,
-  tipWidthFrac: 0.3,
-  widthTaperPower: 1,
+  bandHalfWidth: 0.24,
+  tipWidthFrac: 0.44,
+  widthTaperPower: 0.8,
   thickness: 0.015,
-  tipThicknessFrac: 0.43,
-  bulgeStrength: 0.19,
-  tipDipStrength: 0.3,
-  surfTwistDeg: -15,
+  tipThicknessFrac: 0.17,
+  bulgeStrength: 0.23,
+  tipDipStrength: 0.32,
+  surfTwistDeg: -45,
   filletFrac: 0.06,
-  // Connections: arm extensions (hex-web study's EXT LENGTH = 0.62).
+  subdivisions: 3,
+  // Connections: arm extensions.
   showExtensions: true,
-  extTwistDeg: 180,
-  extLengthFactor: 0.62,
-  extDepthFraction: 0.92,
-  // Appearance (hex-web study: golden, hex holes 0.24, scale 15 over a
-  // radius-2 sphere ~ 1.9 tiles per world unit).
+  extTwistDeg: -210,
+  extLengthFactor: 0.38,
+  extDepthFraction: 0.85,
+  // Rim bead tracing every boundary edge (outer silhouette + gaps),
+  // like the earlier Quin study's RIM_W/RIM_PROUD.
+  showRim: true,
+  rimWidthFrac: 0.02,
+  rimProudFrac: 0.025,
+  // Appearance.
   material: 'golden',
   pattern: 'hex',
-  holeSize: 0.24,
-  patternScale: 1.9,
+  holeSize: 0.21,
+  patternScale: 3.2,
   showLabels: false,
 };
 
 let starGroup = null;
 let extGroup = null;
+let rimGroup = null;
 let labelGroup = null;
 
 function disposeGroup(group) {
@@ -170,7 +175,7 @@ function setLabelsVisible(v) {
 }
 
 function rebuild() {
-  for (const g of [starGroup, extGroup, labelGroup]) {
+  for (const g of [starGroup, extGroup, rimGroup, labelGroup]) {
     if (g) {
       scene.remove(g);
       disposeGroup(g);
@@ -178,6 +183,7 @@ function rebuild() {
   }
   starGroup = new THREE.Group();
   extGroup = new THREE.Group();
+  rimGroup = new THREE.Group();
   labelGroup = new THREE.Group();
 
   // The 2D star (field union of 5 arms + hub, marching squares,
@@ -190,6 +196,11 @@ function rebuild() {
   for (const face of faces) {
     const { geometry, arms } = mapSolidStarToFace(star2D, face, params);
     starGroup.add(new THREE.Mesh(geometry, sculptureMaterial));
+
+    if (params.showRim) {
+      const rimGeom = buildStarRim(star2D, face, params);
+      rimGroup.add(new THREE.Mesh(rimGeom, sculptureMaterial));
+    }
 
     const faceLabel = makeLabel(`F${face.index}`, 'face-label');
     faceLabel.position.copy(face.center.clone().multiplyScalar(1.12));
@@ -233,6 +244,7 @@ function rebuild() {
   setLabelsVisible(params.showLabels);
   scene.add(starGroup);
   scene.add(extGroup);
+  scene.add(rimGroup);
   scene.add(labelGroup);
 
   document.getElementById('metrics').innerHTML =
@@ -270,9 +282,12 @@ bindSlider('bulgeStrength', 'bulgeStrength');
 bindSlider('tipDipStrength', 'tipDipStrength');
 bindSlider('surfTwistDeg', 'surfTwistDeg');
 bindSlider('filletFrac', 'filletFrac');
+bindSlider('subdivisions', 'subdivisions');
 bindSlider('extTwistDeg', 'extTwistDeg');
 bindSlider('extLengthFactor', 'extLengthFactor');
 bindSlider('extDepthFraction', 'extDepthFraction');
+bindSlider('rimWidthFrac', 'rimWidthFrac');
+bindSlider('rimProudFrac', 'rimProudFrac');
 bindSlider('holeSize', 'holeSize', { appearanceOnly: true });
 bindSlider('patternScale', 'patternScale', { appearanceOnly: true });
 
@@ -286,6 +301,10 @@ document.getElementById('pattern').addEventListener('change', (e) => {
 });
 document.getElementById('showExtensions').addEventListener('change', (e) => {
   params.showExtensions = e.target.checked;
+  rebuild();
+});
+document.getElementById('showRim').addEventListener('change', (e) => {
+  params.showRim = e.target.checked;
   rebuild();
 });
 document.getElementById('showLabels').addEventListener('change', (e) => {
