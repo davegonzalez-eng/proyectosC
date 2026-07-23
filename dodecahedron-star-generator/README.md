@@ -1109,19 +1109,119 @@ differ only near the seam (as intended) and are identical through the
 cusp's own bend. Checked in headless Chromium: triangles keep their
 sharp-cusped deltoid read with the fitting on.
 
+## 20. Renamed to Stardreams; collapsible panel; labels removed; flyover mode
+
+Housekeeping plus one substantial new feature.
+
+**Renamed to Stardreams.** The page title and panel heading no longer say
+"Option B prototype" - that was always this project's internal working
+codename during development, not a real name. `spiral-dodeca-prototype.html`
+and `spiral-dodeca-main.js` are unchanged as filenames (renaming them would
+churn every relative import/reference for no user-facing benefit); "the
+project" as the user experiences it is the page title and heading, both now
+Stardreams.
+
+**Collapsible panel, default collapsed.** Reused the same
+`#panel-header`/`#panel-toggle`/`#panel-body` pattern already proven in
+`index.html` (the original 60-arm sculpture's page) - a chevron button in
+the panel's upper right that rotates -90° and hides `#panel-body` via a
+`.collapsed` class toggle. Starts collapsed so the sculpture is what's seen
+first, not a wall of sliders.
+
+**F#/A# labels removed.** The whole feature - `CSS2DRenderer`, the
+`labelGroup`, `makeLabel`, `setLabelsVisible`, the "Show labels" checkbox -
+is gone, not just hidden. It was a development/debugging aid for auditing
+the connection rule during earlier rounds; the click-to-hide-a-face debug
+toggle serves that auditing purpose better now (and the horn-triangle
+adjacency has been numerically verified enough times over past rounds that
+the labels were no longer earning their panel space or render cost).
+
+**Flyover mode.** An automated camera tour, built entirely from the same
+geometry the render pipeline already produces - not a separate hand-tuned
+animation. Two refactors in `spiralarm.js` made this possible with no new
+geometry math:
+
+- `mapStarPoint(u, w, R, face, params)` - the tip-bend/twist/bulge/dip
+  pipeline previously duplicated inside `mapSolidStarToFace` and
+  `buildStarRim`'s local `place()` closures, now a single shared exported
+  function both call. `mapArmCenterline(star2D, face, armIndex, params,
+  inset)` maps one of `buildSolidStar2D`'s raw per-arm 2D polylines (now
+  also returned as `armPolylines2D`) through it, giving the arm's actual
+  rendered-surface centerline (tip-first) rather than the flat spiral the
+  2D field started from - with an optional inward `inset` (fraction of R)
+  so a camera following it reads as flying just inside the shell rather
+  than clipping through it.
+- `hornArcPointAt(tipA, tipB, options)` - `buildHornArc`'s quintic-Hermite-
+  plus-radial-squash centerline function, factored out from the geometry
+  builder so it can be sampled on its own.
+
+`buildFlyoverPath()` (`spiral-dodeca-main.js`) uses both, plus the same
+`connections` array everything else does, to assemble a closed
+`THREE.CatmullRomCurve3`: starting at one arm's tip, each "hop" flies that
+arm tip-to-hub ("to the star face"), picks the next arm on the same face
+and flies hub-to-tip ("back inside following the next arm"), then follows
+one side of that tip's horn triangle to a neighboring star's tip ("turns
+right to continue to the tip of the adjacent star") - repeated for 10 hops
+across different faces, closing back into a loop. A short establishing
+approach (far away -> aligned with the first arm's outward tangent -> just
+outside its tip) is prepended so the loop's first beat reads as "approaches,
+tilts parallel to a star arm, and zooms in," per the brief.
+
+Each frame, `camera.position`/`camera.up` are set from
+`curve.getPointAt(t)` (arc-length parametrized, so speed stays constant
+despite the very uneven point spacing between dense arm samples and sparse
+arc samples) with `up` banked toward the local outward-radial direction
+rather than fixed world-up, so the camera tilts naturally through the
+dive-in/out turns instead of rolling awkwardly. `controls.enabled` is
+toggled off while active (both OrbitControls and the flyover drive the
+same camera) and the camera is reset to its default framing on exit so
+control hands back cleanly.
+
+**Arc-length LUT bug, found while verifying the above.** `getPointAt(t)`'s
+constant-speed traversal depends on an internal arc-length lookup table
+built by sampling `arcLengthDivisions` points UNIFORMLY IN RAW PARAMETER -
+the THREE.js default (200) is far coarser than this curve's ~1200+ control
+points, which are wildly unevenly spaced (a handful of very long sparse
+"approach" jumps next to hundreds of tightly packed arm/arc samples).
+With too few divisions, a whole cluster of real control points can land
+inside a single LUT interval, whose length then gets measured as the
+straight-line CHORD between its two endpoints - badly underestimating true
+arc length wherever the path winds a lot within that stretch. That's
+exactly what happened: small `t` values were warping straight past the
+sparse approach jump into the dense hop section, confirmed by sampling
+`getPointAt` at small `t` and finding close-up interior geometry instead of
+the intended far establishing shot. Fixed by setting
+`curve.arcLengthDivisions = points.length * 4`, comfortably exceeding the
+control-point count; re-verified under Node that `getPointAt(t)` for
+`t` in `[0, 0.1]` now shows radius-from-origin decreasing smoothly
+(7.2 -> 1.9) rather than jumping straight to the near value.
+
+Checked in headless Chromium (using a `performance.now()` monkey-patch in
+the TEST harness only, to get deterministic frames despite this software-
+rendering environment's unpredictable per-frame cost - no debug hooks were
+added to the shipped file): the approach phase is genuinely dark at first
+under lamp mode (external lights are dimmed, so a distant view is
+authentically underexposed - confirmed by brightness-boosting a "black"
+screenshot 8x, which reveals the correctly-framed sphere was there all
+along, just dim) and brightens naturally as the camera closes in - reads as
+an intentional "emerging from darkness" beat rather than a bug. The tour
+flies a continuous, closed loop through several faces with no visible pops
+or direction reversals; toggling it off restores the default framing; the
+panel starts collapsed and expands correctly via the chevron.
+
 ## File layout
 
 ```
 index.html                     page shell, collapsible control panel, import map
-spiral-prototype.html          Option B prototype: single face, standalone viewer (§13)
-spiral-dodeca-prototype.html   Option B prototype: full 12-face sculpture, standalone viewer (§14)
+spiral-prototype.html          single-face standalone viewer for the spiral-star motif (§13)
+spiral-dodeca-prototype.html   Stardreams: full 12-face sculpture, standalone viewer (§14, renamed §20)
 src/geometry.js                 dodecahedron construction, per-face star math, adjacency-connection rule
 src/ribbon.js                   spline-based ribbon geometry (precise dip depth + tangent-matched joins) between two arm tips
 src/startube.js                  star tube cut short of every tip (5 open segments, flat cut edges the ribbons fuse into)
 src/membrane.js                  thin triangulated fill surface for a star's interior
 src/hexgrid.js                    clipped hexagonal-grid fill surface for a star's interior
 src/hextexture.js                 procedural tileable hex-pattern canvas texture, applied as a bump map on ribbons
-src/spiralarm.js                  Option B prototype: 5-arm spiral-star motif per face (§13), not yet wired into main.js
+src/spiralarm.js                  5-arm spiral-star motif per face (§13), also the shared surface-mapping math (§19) all of Stardreams renders from
 src/spiral-prototype-main.js      scene/UI for spiral-prototype.html
 src/spiral-dodeca-main.js         scene/UI for spiral-dodeca-prototype.html - all 12 faces + adjacency-rule ribbon connections (§14)
 src/main.js                      Three.js scene, materials/environment, UI wiring, labels, picking, render loop

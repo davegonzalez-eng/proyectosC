@@ -606,7 +606,14 @@ export function buildSolidStar2D(params, R) {
     boundaryNext = newBoundary;
   }
 
-  return { positions, indices, boundaryNext, tips2D, R };
+  // Raw per-arm centerline polylines (2D, tip-first: index 0 = tip, last =
+  // hub), kept alongside the triangulated field so callers that need the
+  // arm's actual path rather than just its tip - the flyover camera, in
+  // particular - can map every sample through the same place()-equivalent
+  // pipeline the rendered sheet uses (see mapArmCenterline below).
+  const armPolylines2D = armsData.map((a) => a.pts);
+
+  return { positions, indices, boundaryNext, tips2D, armPolylines2D, R };
 }
 
 /**
@@ -649,33 +656,63 @@ function tipBendDip(r, R, params) {
 }
 
 /**
+ * The shared point-mapping pipeline every rendered surface in this module
+ * uses (star sheet, rim, and now the flyover camera path): a local (u, w)
+ * coordinate in a face's tangent plane, run through the exponential tip
+ * bend, surface twist/bulge, and tip dip, in that order. Factored out once
+ * here (previously duplicated inside `mapSolidStarToFace` and
+ * `buildStarRim`) so anything that needs to sample an arbitrary point on
+ * the star's surface - not just its boundary or its tip - uses exactly the
+ * same math the rendered mesh does.
+ */
+export function mapStarPoint(u, w, R, face, params = {}) {
+  const { bulgeStrength = 0, tipDipStrength = 0, surfTwistDeg = 0 } = params;
+  const surfTwistRad = THREE.MathUtils.degToRad(surfTwistDeg);
+  const r = Math.hypot(u, w);
+  const rot = tipBendRotate(u, w, r, R, params);
+  const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
+  const world = face.center.clone().add(applySurfaceTwist(face, rot.u, rot.w, bulge, surfTwistRad));
+  applyTipDip(world, r, face, tipDipStrength);
+  const dip = tipBendDip(r, R, params);
+  if (dip) world.addScaledVector(world.clone().normalize(), -dip);
+  return world;
+}
+
+/**
+ * Map one arm's raw 2D centerline (from `buildSolidStar2D`'s
+ * `armPolylines2D`, tip-first) onto a face through `mapStarPoint`, so the
+ * result tracks the actual rendered arm surface (bulge/twist/tip-bend and
+ * all) rather than the flat spiral the 2D field started from. Used by the
+ * flyover camera path to fly "along" an arm rather than in a straight line
+ * between its tip and hub.
+ *
+ * @param {number} [inset=0] pulls each point toward the sphere center by
+ *   this fraction of R - flying exactly ON the surface looks like clipping
+ *   through the mesh from a first-person camera; a small inset keeps the
+ *   path just under it.
+ * @returns {THREE.Vector3[]} tip-first world-space points
+ */
+export function mapArmCenterline(star2D, face, armIndex, params = {}, inset = 0) {
+  const pts2D = star2D.armPolylines2D[armIndex];
+  return pts2D.map(({ x, y }) => {
+    const p = mapStarPoint(x, y, star2D.R, face, params);
+    if (inset) p.addScaledVector(p.clone().normalize(), -inset * star2D.R);
+    return p;
+  });
+}
+
+/**
  * Map a `buildSolidStar2D` result onto one face: top/bottom sheets offset
  * along the local surface normal, side walls around every boundary loop,
  * UV = (u, w) world coordinates. Also returns each arm's world tip
  * position/tangent for building extensions.
  */
 export function mapSolidStarToFace(star2D, face, params = {}) {
-  const {
-    thickness = 0.015,
-    bulgeStrength = 0,
-    tipDipStrength = 0,
-    surfTwistDeg = 0,
-  } = params;
+  const { thickness = 0.015 } = params;
 
   const R = star2D.R;
-  const surfTwistRad = THREE.MathUtils.degToRad(surfTwistDeg);
   const halfT = (R * thickness) / 2;
-
-  const place = (u, w) => {
-    const r = Math.hypot(u, w);
-    const rot = tipBendRotate(u, w, r, R, params);
-    const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
-    const world = face.center.clone().add(applySurfaceTwist(face, rot.u, rot.w, bulge, surfTwistRad));
-    applyTipDip(world, r, face, tipDipStrength);
-    const dip = tipBendDip(r, R, params);
-    if (dip) world.addScaledVector(world.clone().normalize(), -dip);
-    return world;
-  };
+  const place = (u, w) => mapStarPoint(u, w, R, face, params);
 
   const n2 = star2D.positions.length / 2;
   const eps = R * 1e-3;
@@ -787,31 +824,18 @@ export function mapSolidStarToFace(star2D, face, params = {}) {
 export function buildStarRim(star2D, face, params = {}) {
   const {
     thickness = 0.015,
-    bulgeStrength = 0,
-    tipDipStrength = 0,
-    surfTwistDeg = 0,
     rimWidthFrac = 0.02,
     rimProudFrac = 0.025,
     rimCrossSamples = 4,
   } = params;
 
   const R = star2D.R;
-  const surfTwistRad = THREE.MathUtils.degToRad(surfTwistDeg);
   const halfT = (R * thickness) / 2;
   const rimWidth = R * rimWidthFrac;
   const rimProud = R * rimProudFrac;
   const eps = R * 1e-3;
 
-  const place = (u, w) => {
-    const r = Math.hypot(u, w);
-    const rot = tipBendRotate(u, w, r, R, params);
-    const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
-    const world = face.center.clone().add(applySurfaceTwist(face, rot.u, rot.w, bulge, surfTwistRad));
-    applyTipDip(world, r, face, tipDipStrength);
-    const dip = tipBendDip(r, R, params);
-    if (dip) world.addScaledVector(world.clone().normalize(), -dip);
-    return world;
-  };
+  const place = (u, w) => mapStarPoint(u, w, R, face, params);
 
   const idx = star2D.indices;
   const edgeThird = new Map();
@@ -949,16 +973,15 @@ export function buildStarRim(star2D, face, params = {}) {
  * to the flat-launch behavior, 1 = exact match, >1 overshoots for a more
  * flourished horn.
  */
-export function buildHornArc(tipA, tipB, options = {}) {
-  const {
-    arcWidth = 0.04,    // full in-surface width of the bead
-    arcHeight = 0.04,   // full radial height of the bead
-    lengthFactor = 0.55,
-    depthFraction = 0.95,
-    clothoidFactor = 1,
-    segments = 48,
-    radialSegments = 10,
-  } = options;
+/**
+ * Builds the horn arc's centerline function alone (no cross-section
+ * geometry) - the quintic-Hermite-plus-radial-squash from `buildHornArc`,
+ * factored out so the flyover camera path can fly along the exact curve
+ * the rendered bead follows instead of approximating it.
+ * @returns {(t: number) => THREE.Vector3} t in [0,1], tipA at 0, tipB at 1
+ */
+export function hornArcPointAt(tipA, tipB, options = {}) {
+  const { lengthFactor = 0.55, depthFraction = 0.95, clothoidFactor = 1 } = options;
 
   const P0 = tipA.tipPosition.clone();
   const P1 = tipB.tipPosition.clone();
@@ -988,7 +1011,7 @@ export function buildHornArc(tipA, tipB, options = {}) {
   };
   // Blend toward `depthFraction` of the endpoints' radius mid-span (sin
   // profile, zero at both ends so the cusps stay exactly ON the tips).
-  const pointAt = (t) => {
+  return (t) => {
     const p = hermite(t);
     const baseR = THREE.MathUtils.lerp(P0.length(), P1.length(), t);
     const target = baseR * THREE.MathUtils.lerp(1, depthFraction, Math.sin(Math.PI * t));
@@ -996,7 +1019,17 @@ export function buildHornArc(tipA, tipB, options = {}) {
     if (len > 1e-9) p.multiplyScalar(target / len);
     return p;
   };
+}
 
+export function buildHornArc(tipA, tipB, options = {}) {
+  const {
+    arcWidth = 0.04,    // full in-surface width of the bead
+    arcHeight = 0.04,   // full radial height of the bead
+    segments = 48,
+    radialSegments = 10,
+  } = options;
+
+  const pointAt = hornArcPointAt(tipA, tipB, options);
   const a = arcWidth / 2;
   const b = arcHeight / 2;
   const positions = [];
