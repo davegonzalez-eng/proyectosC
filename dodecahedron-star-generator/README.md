@@ -766,6 +766,65 @@ visibly slide through the gaps of their neighbors and disappear
 underneath - the earlier study's interlock, carried by this project's
 sea-star arms.
 
+## 15. Solid fused stars, materials, perforation patterns, twisting arm extensions
+
+Four requests in one pass, all on the dodeca prototype page:
+
+**Solid stars.** Each star is now ONE smoothly-fused sheet instead of 5
+overlapping slabs. The 5 arms + hub are expressed as a single signed-
+distance field in the face's 2D `(u, w)` plane (per-arm distance-to-
+centerline minus the local taper half-width, smooth-min'd between arms so
+junctions fillet organically - "Arm fusion fillet" slider), marching
+squares extracts the outline at iso 0, the region is triangulated
+(earcut via `THREE.ShapeUtils`, holes supported) and midpoint-subdivided
+so the interior follows the bulge/twist curvature, then mapped through
+the same `place()` pipeline as before. The 2D work depends only on
+params + R_out - identical for all 12 faces - so it runs once per rebuild
+(`buildSolidStar2D`) and is mapped per face (`mapSolidStarToFace`).
+Two bugs found by numeric verification along the way: marching-squares
+cases 13/14 emitted crossings on edges with no sign change (garbage
+points that chained into fragments), and a greedy per-point collinearity
+decimation quietly collapsed smooth contours from ~600 points to ~9 -
+both fixed (the decimation replaced by simple duplicate-collapse).
+
+**Materials + patterns.** A shared `MeshStandardMaterial` (so stars and
+extensions read as one continuous surface) with presets - golden (the
+hex-web study's default), matte white (paper/lamp), bronze, copper,
+titanium, chrome, gunmetal - and a perforation pattern punched via
+`createPerforationTexture` in hextexture.js used as alphaMap (alphaTest
+0.45) + bumpMap: solid white with a black hole per hex cell, `holeFrac`
+matching the study's HEX HOLE SIZE scale (default 0.24), and a `jitter`
+mode where cells deform into irregular organic polygons with varying
+hole sizes - the **coral** pattern. UVs on the solid sheet are raw
+`(u, w)` world coordinates, so the pattern keeps constant physical scale
+across the whole star; "Pattern scale" sets tiles per world unit
+(default 1.9 ~ the study's HEX GRID SCALE 15 over a radius-2 sphere).
+
+**Arm extensions instead of ribbons.** `buildArmExtension()`: a Hermite
+curve from arm A's tip (leaving along A's own outward tangent) to arm
+B's tip (arriving against B's outward tangent, length factor = the
+study's EXT LENGTH 0.62), extruded with the arms' own tip cross-section
+and rolled gradually about its own axis by "Extension twist" (CCW
+positive, default 180° so it lands flat-to-flat at the far end), pulled
+inward mid-span ("Extension depth fraction") so it passes under whatever
+it crosses. The ribbon system is gone from this page.
+
+**Labels + connection audit.** A "Show F#/A# labels" toggle (CSS2D)
+displays each face's F# at its center and every arm's A# at its tip, and
+the panel lists all 60 connection pairs - so the mapping (still
+`computeAdjacentFaceConnections()`'s rule, reverse-engineered from the
+user's original reference sequences for face 7 and face 1) can be
+audited and amended pair by pair.
+
+Checked standalone under Node: 2D star ~5.9k verts / 9.5k tris with zero
+NaN; 12 mapped faces ~256k verts zero NaN; 60/60 extensions built zero
+NaN; timings ~235ms (2D, once) + ~375ms (12 faces) + ~26ms (extensions).
+Checked in headless Chromium: zero console errors; golden + hex reads
+strikingly close to the reference lamp (perforated metallic bands
+weaving); matte white + coral reads as porous coral/bone; labels default
+off and toggle correctly (the vendored CSS2DRenderer ignores ancestor
+visibility, so the toggle sets each label's own).
+
 ## File layout
 
 ```

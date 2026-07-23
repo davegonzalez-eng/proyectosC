@@ -16,7 +16,7 @@
       position: fixed;
       top: 14px;
       left: 14px;
-      width: 300px;
+      width: 302px;
       max-height: calc(100vh - 28px);
       overflow-y: auto;
       background: rgba(18, 20, 26, 0.88);
@@ -27,40 +27,76 @@
       font-size: 12px;
     }
     #panel h1 { font-size: 14px; margin: 0 0 8px; }
+    #panel h2 { font-size: 11px; margin: 14px 0 6px; color: #ffd27f; text-transform: uppercase; letter-spacing: 0.5px; }
     #panel p.sub { margin: 0 0 12px; color: #9aa0ac; line-height: 1.4; }
-    .row { margin-bottom: 10px; }
-    .row label { display: flex; justify-content: space-between; margin-bottom: 3px; color: #c7cad1; }
+    .row { margin-bottom: 9px; }
+    .row label { display: flex; justify-content: space-between; margin-bottom: 3px; color: #c7cad1; align-items: center; }
     .row input[type="range"] { width: 100%; }
+    .row select { width: 100%; background: #0d0f14; color: #e8e8ec; border: 1px solid rgba(255,255,255,0.15); border-radius: 5px; padding: 3px 6px; }
     #metrics { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); line-height: 1.6; color: #ffd27f; }
+    details { margin-top: 10px; color: #9aa0ac; }
+    details pre { font-size: 10px; line-height: 1.5; max-height: 200px; overflow-y: auto; background: #0d0f14; padding: 8px; border-radius: 6px; }
+    .face-label { color: #7fd1ff; font-size: 13px; font-weight: 700; text-shadow: 0 0 4px #000, 0 0 4px #000; pointer-events: none; }
+    .arm-label { color: #ffd27f; font-size: 10px; text-shadow: 0 0 3px #000, 0 0 3px #000; pointer-events: none; }
   </style>
 </head>
 <body>
   <div id="scene-container"></div>
   <div id="panel">
     <h1>Option B prototype: full dodecahedron</h1>
-    <p class="sub">All 12 faces with the 5-arm spiral-star motif. Every star is rotated about its face normal (like the earlier Quin hex-web study's OFFSET control) and its arms reach past the face edge (tip reach &gt; 1) while dipping toward the sphere center - so each arm threads through a gap of the equally-rotated neighboring star and passes underneath it. Optional connector ribbons (using the original adjacency rule) can be layered on top.</p>
+    <p class="sub">Solid smoothly-fused spiral stars (rotated 23&deg;), connected by their own arms extending and twisting counter-clockwise to meet the arm of the linked star. Toggle labels to audit the F#-A# connection mapping.</p>
 
+    <h2>Appearance</h2>
+    <div class="row"><label><span>Material</span></label>
+      <select id="material">
+        <option value="golden" selected>Golden</option>
+        <option value="matteWhite">Matte white (paper/lamp)</option>
+        <option value="bronze">Bronze</option>
+        <option value="copper">Copper</option>
+        <option value="titanium">Titanium</option>
+        <option value="chrome">Chrome</option>
+        <option value="gunmetal">Gunmetal</option>
+      </select>
+    </div>
+    <div class="row"><label><span>Pattern</span></label>
+      <select id="pattern">
+        <option value="hex" selected>Hex grid</option>
+        <option value="coral">Irregular (coral)</option>
+        <option value="none">None (solid)</option>
+      </select>
+    </div>
+    <div class="row"><label><span>Hole size</span><span id="v-holeSize">0.24</span></label><input id="holeSize" type="range" min="0" max="0.45" step="0.01" value="0.24"></div>
+    <div class="row"><label><span>Pattern scale (tiles / world unit)</span><span id="v-patternScale">1.9</span></label><input id="patternScale" type="range" min="0.5" max="5" step="0.1" value="1.9"></div>
+
+    <h2>Star shape</h2>
     <div class="row"><label><span>Star rotation (deg)</span><span id="v-starRotationDeg">23</span></label><input id="starRotationDeg" type="range" min="-36" max="36" step="1" value="23"></div>
     <div class="row"><label><span>Tip reach (x R_out)</span><span id="v-tipScale">1.05</span></label><input id="tipScale" type="range" min="0.7" max="1.35" step="0.01" value="1.05"></div>
     <div class="row"><label><span>Turns per arm</span><span id="v-turns">0.1</span></label><input id="turns" type="range" min="0.05" max="1.5" step="0.05" value="0.1"></div>
     <div class="row"><label><span>Hub radius / R_out</span><span id="v-hubRadiusFrac">0.02</span></label><input id="hubRadiusFrac" type="range" min="0.02" max="0.45" step="0.01" value="0.02"></div>
-    <div class="row"><label><span>Band half-width / R_out (hub width)</span><span id="v-bandHalfWidth">0.25</span></label><input id="bandHalfWidth" type="range" min="0.02" max="0.4" step="0.005" value="0.25"></div>
+    <div class="row"><label><span>Band half-width / R_out</span><span id="v-bandHalfWidth">0.25</span></label><input id="bandHalfWidth" type="range" min="0.02" max="0.4" step="0.005" value="0.25"></div>
     <div class="row"><label><span>Tip width fraction</span><span id="v-tipWidthFrac">0.3</span></label><input id="tipWidthFrac" type="range" min="0" max="1" step="0.01" value="0.3"></div>
     <div class="row"><label><span>Width taper power</span><span id="v-widthTaperPower">1</span></label><input id="widthTaperPower" type="range" min="0.4" max="3" step="0.05" value="1"></div>
+    <div class="row"><label><span>Arm fusion fillet / R_out</span><span id="v-filletFrac">0.06</span></label><input id="filletFrac" type="range" min="0.01" max="0.2" step="0.01" value="0.06"></div>
     <div class="row"><label><span>Thickness / R_out</span><span id="v-thickness">0.015</span></label><input id="thickness" type="range" min="0.01" max="0.12" step="0.005" value="0.015"></div>
     <div class="row"><label><span>Tip thickness fraction</span><span id="v-tipThicknessFrac">0.43</span></label><input id="tipThicknessFrac" type="range" min="0.1" max="1" step="0.01" value="0.43"></div>
-    <div class="row"><label><span>Bulge strength</span><span id="v-bulgeStrength">0.08</span></label><input id="bulgeStrength" type="range" min="0" max="0.6" step="0.01" value="0.08"></div>
+    <div class="row"><label><span>Bulge strength</span><span id="v-bulgeStrength">0.19</span></label><input id="bulgeStrength" type="range" min="0" max="0.6" step="0.01" value="0.19"></div>
     <div class="row"><label><span>Tip-dip strength</span><span id="v-tipDipStrength">0.3</span></label><input id="tipDipStrength" type="range" min="0" max="0.6" step="0.01" value="0.3"></div>
     <div class="row"><label><span>Surface twist (deg)</span><span id="v-surfTwistDeg">-15</span></label><input id="surfTwistDeg" type="range" min="-90" max="90" step="1" value="-15"></div>
-    <div class="row"><label><span>Connector ribbons (off: arms weave directly)</span><input id="showRibbons" type="checkbox" style="width:auto"></label></div>
-    <div class="row"><label><span>Ribbon width / tip width</span><span id="v-ribbonWidthFactor">1.15</span></label><input id="ribbonWidthFactor" type="range" min="1" max="2.5" step="0.05" value="1.15"></div>
-    <div class="row"><label><span>Ribbon twist turns</span><span id="v-ribbonTwistTurns">0.4</span></label><input id="ribbonTwistTurns" type="range" min="0" max="1.5" step="0.05" value="0.4"></div>
-    <div class="row"><label><span>Ribbon depth fraction</span><span id="v-ribbonDepthFraction">0.94</span></label><input id="ribbonDepthFraction" type="range" min="0.7" max="1" step="0.01" value="0.94"></div>
-    <div class="row"><label><span>Ribbon leave fraction</span><span id="v-ribbonLeaveFraction">0.06</span></label><input id="ribbonLeaveFraction" type="range" min="0.02" max="0.3" step="0.01" value="0.06"></div>
-    <div class="row"><label><span>Armpit radius / R_out</span><span id="v-armpitRadiusFrac">0.45</span></label><input id="armpitRadiusFrac" type="range" min="0.15" max="0.7" step="0.01" value="0.45"></div>
-    <div class="row"><label><span>Armpit neighbor side (-1/+1)</span><span id="v-armpitNeighborOffset">1</span></label><input id="armpitNeighborOffset" type="range" min="-1" max="1" step="2" value="1"></div>
+
+    <h2>Connections (arm extensions)</h2>
+    <div class="row"><label><span>Show extensions</span><input id="showExtensions" type="checkbox" checked style="width:auto"></label></div>
+    <div class="row"><label><span>Extension twist (deg, CCW)</span><span id="v-extTwistDeg">180</span></label><input id="extTwistDeg" type="range" min="-360" max="360" step="5" value="180"></div>
+    <div class="row"><label><span>Extension length factor</span><span id="v-extLengthFactor">0.62</span></label><input id="extLengthFactor" type="range" min="0.15" max="1" step="0.01" value="0.62"></div>
+    <div class="row"><label><span>Extension depth fraction</span><span id="v-extDepthFraction">0.92</span></label><input id="extDepthFraction" type="range" min="0.75" max="1" step="0.01" value="0.92"></div>
+
+    <h2>Debug</h2>
+    <div class="row"><label><span>Show F#/A# labels</span><input id="showLabels" type="checkbox" style="width:auto"></label></div>
 
     <div id="metrics"></div>
+    <details>
+      <summary>Connection pairs (60)</summary>
+      <pre id="conn-list"></pre>
+    </details>
   </div>
 
   <script type="importmap">

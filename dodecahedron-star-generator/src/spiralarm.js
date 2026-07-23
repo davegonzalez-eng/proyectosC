@@ -317,6 +317,500 @@ export function buildHubCap(face, params = {}) {
  * @param {number} [params.starRotationDeg=0] rotates the whole star about the face normal (deg, CCW)
  * @returns {{geometry: THREE.BufferGeometry, arms: Array<{geometry: THREE.BufferGeometry, points: THREE.Vector3[], metrics: object, armIndex: number}>}}
  */
+// ---------------------------------------------------------------------
+// SOLID star: one smoothly-fused sheet instead of 5 overlapping slabs.
+//
+// The 5 arms + hub are expressed as a single signed-distance field in the
+// face's 2D (u, w) plane - per-arm distance-to-centerline minus the local
+// taper half-width, smooth-min'd BETWEEN arms (and the hub disc) so the
+// junctions fillet into each other organically instead of two slabs
+// interpenetrating. Marching squares extracts the outline at iso 0, the
+// region is triangulated (with holes, if the field encloses any), midpoint-
+// subdivided so the interior samples the bulge/twist curvature, and only
+// then mapped through the same place() pipeline the slab arms used. UVs
+// are the raw (u, w) coordinates in world units, so tiling perforation
+// textures keep constant physical scale across the whole star.
+//
+// The 2D work depends only on params + R_out - identical for all 12 faces -
+// so it's split into buildSolidStar2D (run once) and mapSolidStarToFace
+// (run per face, cheap).
+// ---------------------------------------------------------------------
+
+function smin(a, b, k) {
+  const h = Math.min(Math.max(0.5 + 0.5 * (b - a) / k, 0), 1);
+  return b + (a - b) * h - k * h * (1 - h);
+}
+
+/**
+ * @param {object} params same shape params as `buildSpiralStar` plus:
+ * @param {number} [params.filletFrac=0.06] smooth-union fillet radius between arms/hub, as a fraction of R_out
+ * @param {number} [params.fieldGrid=144] marching-squares grid resolution
+ * @param {number} [params.armSamples=48] centerline samples per arm
+ * @param {number} [params.subdivisions=2] midpoint-subdivision rounds after triangulation
+ * @param {number} R face circumradius (face.R_out - identical for all faces)
+ * @returns 2D star mesh: {positions: [x,y,...], indices, boundaryNext: Map, tips2D: [{tip, prev}], R}
+ */
+export function buildSolidStar2D(params, R) {
+  const {
+    armCount = 5,
+    starRotationDeg = 0,
+    turns = 0.1,
+    tipScale = 1.05,
+    hubRadiusFrac = 0.02,
+    bandHalfWidth = 0.25,
+    tipWidthFrac = 0.3,
+    widthTaperPower = 1,
+    filletFrac = 0.06,
+    capRadiusFrac,
+    fieldGrid = 144,
+    armSamples = 48,
+    subdivisions = 2,
+  } = params;
+
+  const rot = THREE.MathUtils.degToRad(starRotationDeg);
+  const r0 = R * tipScale;
+  const hubRadius = R * hubRadiusFrac;
+  const spiralThetaMax = turns * Math.PI * 2;
+  const kSpiral = Math.log(r0 / hubRadius) / spiralThetaMax;
+  const bandHW = R * bandHalfWidth;
+  const fillet = Math.max(R * filletFrac, 1e-4);
+  const capR = R * (capRadiusFrac ?? Math.max(hubRadiusFrac * 1.5, 0.05));
+
+  // Per-arm centerline polylines + per-sample half-widths (taper measured
+  // along arc length from tip toward hub, same as buildSpiralBand).
+  const armsData = [];
+  const tips2D = [];
+  for (let k = 0; k < armCount; k++) {
+    const ang0 = (k * Math.PI * 2) / armCount + rot;
+    const pts = [];
+    for (let i = 0; i <= armSamples; i++) {
+      const theta = (spiralThetaMax * i) / armSamples;
+      const rr = r0 * Math.exp(-kSpiral * theta);
+      const a = ang0 - theta;
+      pts.push({ x: rr * Math.cos(a), y: rr * Math.sin(a) });
+    }
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) {
+      cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+    }
+    const total = cum[cum.length - 1] || 1;
+    const halfW = cum.map((c) =>
+      bandHW * THREE.MathUtils.lerp(tipWidthFrac, 1, Math.pow(c / total, widthTaperPower)));
+    armsData.push({ pts, halfW });
+    tips2D.push({ tip: pts[0], prev: pts[1] });
+  }
+
+  const armDist = (arm, px, py) => {
+    let d = Infinity;
+    const { pts, halfW } = arm;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const ax = pts[i].x, ay = pts[i].y;
+      const bx = pts[i + 1].x, by = pts[i + 1].y;
+      const abx = bx - ax, aby = by - ay;
+      const len2 = abx * abx + aby * aby;
+      let t = len2 > 0 ? ((px - ax) * abx + (py - ay) * aby) / len2 : 0;
+      t = Math.min(Math.max(t, 0), 1);
+      const dx = px - (ax + abx * t), dy = py - (ay + aby * t);
+      const hw = halfW[i] + (halfW[i + 1] - halfW[i]) * t;
+      d = Math.min(d, Math.hypot(dx, dy) - hw);
+    }
+    return d;
+  };
+
+  const field = (px, py) => {
+    let d = armDist(armsData[0], px, py);
+    for (let k = 1; k < armsData.length; k++) d = smin(d, armDist(armsData[k], px, py), fillet);
+    return smin(d, Math.hypot(px, py) - capR, fillet);
+  };
+
+  // Sample the field on a grid covering the star's maximum possible extent.
+  const M = r0 + bandHW * 1.25;
+  const G = fieldGrid;
+  const coord = (j) => -M + (2 * M * j) / (G - 1);
+  const F = new Float64Array(G * G);
+  for (let j = 0; j < G; j++) {
+    const y = coord(j);
+    for (let i = 0; i < G; i++) F[j * G + i] = field(coord(i), y);
+  }
+
+  // Marching squares at iso 0 (inside = field < 0). Shared cell edges
+  // compute identical crossings, so endpoint keys chain exactly.
+  const segs = [];
+  const lerpPt = (xa, ya, va, xb, yb, vb) => {
+    const t = va / (va - vb);
+    return { x: xa + (xb - xa) * t, y: ya + (yb - ya) * t };
+  };
+  for (let j = 0; j < G - 1; j++) {
+    for (let i = 0; i < G - 1; i++) {
+      const x0 = coord(i), x1 = coord(i + 1), y0 = coord(j), y1 = coord(j + 1);
+      const v00 = F[j * G + i], v10 = F[j * G + i + 1];
+      const v01 = F[(j + 1) * G + i], v11 = F[(j + 1) * G + i + 1];
+      let c = 0;
+      if (v00 < 0) c |= 1;
+      if (v10 < 0) c |= 2;
+      if (v11 < 0) c |= 4;
+      if (v01 < 0) c |= 8;
+      if (c === 0 || c === 15) continue;
+      const eB = () => lerpPt(x0, y0, v00, x1, y0, v10); // bottom
+      const eR = () => lerpPt(x1, y0, v10, x1, y1, v11); // right
+      const eT = () => lerpPt(x0, y1, v01, x1, y1, v11); // top
+      const eL = () => lerpPt(x0, y0, v00, x0, y1, v01); // left
+      const add = (p, q) => segs.push([p, q]);
+      switch (c) {
+        case 1: add(eL(), eB()); break;
+        case 2: add(eB(), eR()); break;
+        case 3: add(eL(), eR()); break;
+        case 4: add(eR(), eT()); break;
+        case 6: add(eB(), eT()); break;
+        case 7: add(eL(), eT()); break;
+        case 8: add(eT(), eL()); break;
+        case 9: add(eT(), eB()); break;
+        case 11: add(eT(), eR()); break;
+        case 12: add(eR(), eL()); break;
+        case 13: add(eB(), eR()); break;
+        case 14: add(eL(), eB()); break;
+        case 5: { // saddle: decide by cell-center sample
+          if (field((x0 + x1) / 2, (y0 + y1) / 2) < 0) { add(eL(), eT()); add(eR(), eB()); }
+          else { add(eL(), eB()); add(eR(), eT()); }
+          break;
+        }
+        case 10: {
+          if (field((x0 + x1) / 2, (y0 + y1) / 2) < 0) { add(eB(), eL()); add(eT(), eR()); }
+          else { add(eB(), eR()); add(eT(), eL()); }
+          break;
+        }
+      }
+    }
+  }
+
+  // Chain segments into closed loops by shared endpoints. Orientation-
+  // agnostic: segments are indexed by BOTH endpoints and walked whichever
+  // way they connect, since the case table above makes no promise about
+  // consistent winding direction.
+  const key = (p) => `${p.x.toFixed(6)},${p.y.toFixed(6)}`;
+  const incident = new Map();
+  segs.forEach((s, idx) => {
+    for (const e of [0, 1]) {
+      const k = key(s[e]);
+      if (!incident.has(k)) incident.set(k, []);
+      incident.get(k).push({ idx, e });
+    }
+  });
+  const usedIdx = new Uint8Array(segs.length);
+  const loops = [];
+  for (let s0 = 0; s0 < segs.length; s0++) {
+    if (usedIdx[s0]) continue;
+    usedIdx[s0] = 1;
+    const loop = [segs[s0][0]];
+    const startKey = key(segs[s0][0]);
+    let cur = segs[s0][1];
+    for (;;) {
+      const ck = key(cur);
+      if (ck === startKey) break; // closed the loop
+      loop.push(cur);
+      const cands = (incident.get(ck) || []).filter((c) => !usedIdx[c.idx]);
+      if (!cands.length) break; // open chain (shouldn't happen) - drop below if tiny
+      const c = cands[0];
+      usedIdx[c.idx] = 1;
+      cur = segs[c.idx][c.e === 0 ? 1 : 0];
+    }
+    if (loop.length >= 6) loops.push(loop);
+  }
+
+  // Collapse consecutive duplicate/near-duplicate points (a contour point
+  // can land exactly on a grid corner and appear twice); keep everything
+  // else - the marching-squares density is what the walls and the
+  // triangulation both want, and real simplification (tried first as a
+  // greedy per-point collinearity test) quietly collapses smooth curves
+  // to almost nothing.
+  const eps = M * 1e-6;
+  const decimated = loops.map((loop) => {
+    const out = [];
+    for (const p of loop) {
+      const last = out[out.length - 1];
+      if (!last || Math.hypot(p.x - last.x, p.y - last.y) > eps) out.push(p);
+    }
+    if (out.length > 1) {
+      const first = out[0], last = out[out.length - 1];
+      if (Math.hypot(first.x - last.x, first.y - last.y) <= eps) out.pop();
+    }
+    return out;
+  }).filter((l) => l.length >= 4);
+
+  const signedArea = (loop) => {
+    let a = 0;
+    for (let i = 0; i < loop.length; i++) {
+      const p = loop[i], q = loop[(i + 1) % loop.length];
+      a += p.x * q.y - q.x * p.y;
+    }
+    return a / 2;
+  };
+  decimated.sort((a, b) => Math.abs(signedArea(b)) - Math.abs(signedArea(a)));
+  const outer = decimated[0];
+  const holes = decimated.slice(1).filter((l) => Math.abs(signedArea(l)) > (M * M) * 1e-5);
+  if (signedArea(outer) < 0) outer.reverse();
+  for (const h of holes) if (signedArea(h) > 0) h.reverse();
+
+  // Triangulate (earcut via ShapeUtils), then midpoint-subdivide so the
+  // interior gets enough vertices to follow bulge/twist curvature.
+  const outerV = outer.map((p) => new THREE.Vector2(p.x, p.y));
+  const holesV = holes.map((h) => h.map((p) => new THREE.Vector2(p.x, p.y)));
+  const tris = THREE.ShapeUtils.triangulateShape(outerV, holesV);
+
+  const positions = [];
+  const pushPt = (p) => { positions.push(p.x, p.y); return positions.length / 2 - 1; };
+  outer.forEach(pushPt);
+  holes.forEach((h) => h.forEach(pushPt));
+  let indices = [];
+  for (const t of tris) indices.push(t[0], t[1], t[2]);
+
+  // Ordered boundary edges (a -> b following each loop) for wall building,
+  // maintained through subdivision.
+  let boundaryNext = new Map();
+  let base = 0;
+  for (const loop of [outer, ...holes]) {
+    for (let i = 0; i < loop.length; i++) {
+      boundaryNext.set(base + i, base + ((i + 1) % loop.length));
+    }
+    base += loop.length;
+  }
+
+  for (let round = 0; round < subdivisions; round++) {
+    const midCache = new Map();
+    const newIndices = [];
+    const midpoint = (a, b) => {
+      const k2 = a < b ? `${a}:${b}` : `${b}:${a}`;
+      if (midCache.has(k2)) return midCache.get(k2);
+      const idx = positions.length / 2;
+      positions.push((positions[a * 2] + positions[b * 2]) / 2, (positions[a * 2 + 1] + positions[b * 2 + 1]) / 2);
+      midCache.set(k2, idx);
+      return idx;
+    };
+    for (let t = 0; t < indices.length; t += 3) {
+      const a = indices[t], b = indices[t + 1], c = indices[t + 2];
+      const ab = midpoint(a, b), bc = midpoint(b, c), ca = midpoint(c, a);
+      newIndices.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca);
+    }
+    indices = newIndices;
+    const newBoundary = new Map();
+    for (const [a, b] of boundaryNext) {
+      const k2 = a < b ? `${a}:${b}` : `${b}:${a}`;
+      if (midCache.has(k2)) {
+        const m = midCache.get(k2);
+        newBoundary.set(a, m);
+        newBoundary.set(m, b);
+      } else {
+        newBoundary.set(a, b);
+      }
+    }
+    boundaryNext = newBoundary;
+  }
+
+  return { positions, indices, boundaryNext, tips2D, R };
+}
+
+/**
+ * Map a `buildSolidStar2D` result onto one face: top/bottom sheets offset
+ * along the local surface normal, side walls around every boundary loop,
+ * UV = (u, w) world coordinates. Also returns each arm's world tip
+ * position/tangent for building extensions.
+ */
+export function mapSolidStarToFace(star2D, face, params = {}) {
+  const {
+    thickness = 0.015,
+    bulgeStrength = 0,
+    tipDipStrength = 0,
+    surfTwistDeg = 0,
+  } = params;
+
+  const R = star2D.R;
+  const surfTwistRad = THREE.MathUtils.degToRad(surfTwistDeg);
+  const halfT = (R * thickness) / 2;
+
+  const place = (u, w) => {
+    const r = Math.hypot(u, w);
+    const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
+    const world = face.center.clone().add(applySurfaceTwist(face, u, w, bulge, surfTwistRad));
+    applyTipDip(world, r, face, tipDipStrength);
+    return world;
+  };
+
+  const n2 = star2D.positions.length / 2;
+  const eps = R * 1e-3;
+  const worldPts = new Array(n2);
+  const normals = new Array(n2);
+  for (let i = 0; i < n2; i++) {
+    const u = star2D.positions[i * 2], w = star2D.positions[i * 2 + 1];
+    worldPts[i] = place(u, w);
+    const pu = place(u + eps, w).sub(place(u - eps, w));
+    const pw = place(u, w + eps).sub(place(u, w - eps));
+    const n = new THREE.Vector3().crossVectors(pu, pw).normalize();
+    if (n.dot(face.normal) < 0) n.negate();
+    normals[i] = n;
+  }
+
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  const pushVert = (p, u, v) => { positions.push(p.x, p.y, p.z); uvs.push(u, v); };
+
+  // Top sheet (2D triangulation is CCW seen from +normal side).
+  for (let i = 0; i < n2; i++) {
+    pushVert(worldPts[i].clone().addScaledVector(normals[i], halfT), star2D.positions[i * 2], star2D.positions[i * 2 + 1]);
+  }
+  for (let t = 0; t < star2D.indices.length; t += 3) {
+    indices.push(star2D.indices[t], star2D.indices[t + 1], star2D.indices[t + 2]);
+  }
+  // Bottom sheet, reversed winding.
+  const botBase = n2;
+  for (let i = 0; i < n2; i++) {
+    pushVert(worldPts[i].clone().addScaledVector(normals[i], -halfT), star2D.positions[i * 2], star2D.positions[i * 2 + 1]);
+  }
+  for (let t = 0; t < star2D.indices.length; t += 3) {
+    indices.push(botBase + star2D.indices[t], botBase + star2D.indices[t + 2], botBase + star2D.indices[t + 1]);
+  }
+  // Side walls along every boundary loop (crisp edges via fresh vertices).
+  let arc = 0;
+  for (const [a, b] of star2D.boundaryNext) {
+    const ta = worldPts[a].clone().addScaledVector(normals[a], halfT);
+    const ba = worldPts[a].clone().addScaledVector(normals[a], -halfT);
+    const tb = worldPts[b].clone().addScaledVector(normals[b], halfT);
+    const bb = worldPts[b].clone().addScaledVector(normals[b], -halfT);
+    const vbase = positions.length / 3;
+    const seg = ta.distanceTo(tb);
+    pushVert(ta, arc, 0);
+    pushVert(ba, arc, halfT * 2);
+    pushVert(tb, arc + seg, 0);
+    pushVert(bb, arc + seg, halfT * 2);
+    indices.push(vbase, vbase + 2, vbase + 1, vbase + 1, vbase + 2, vbase + 3);
+    arc += seg;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
+  const arms = star2D.tips2D.map(({ tip, prev }, armIndex) => {
+    const tipPos = place(tip.x, tip.y);
+    const tangent = tipPos.clone().sub(place(prev.x, prev.y)).normalize();
+    return { armIndex, tipPosition: tipPos, tipTangent: tangent };
+  });
+
+  return { geometry, arms };
+}
+
+/**
+ * A connector that CONTINUES an arm rather than reading as a separate
+ * ribbon: a Hermite curve from arm A's tip (leaving along A's own outward
+ * tangent) to arm B's tip (arriving against B's outward tangent), extruded
+ * with the arms' own tip cross-section (constant width/thickness, major
+ * axis = cross(tangent, sphere-radial) like everything else here), rolled
+ * gradually about its own axis by `twistDeg` (counter-clockwise positive;
+ * 180 lands flat-to-flat again at the far end), and pulled inward mid-span
+ * (`depthFraction`) so it passes UNDER whatever it crosses.
+ */
+export function buildArmExtension(tipA, tipB, options = {}) {
+  const {
+    halfWidth = 0.05,
+    halfThickness = 0.01,
+    lengthFactor = 0.62,
+    twistDeg = 180,
+    depthFraction = 0.92,
+    segments = 40,
+  } = options;
+
+  const P0 = tipA.tipPosition.clone();
+  const P1 = tipB.tipPosition.clone();
+  const span = P0.distanceTo(P1);
+  const m0 = tipA.tipTangent.clone().multiplyScalar(span * lengthFactor);
+  const m1 = tipB.tipTangent.clone().multiplyScalar(-span * lengthFactor);
+
+  const hermite = (t) => {
+    const t2 = t * t, t3 = t2 * t;
+    return new THREE.Vector3()
+      .addScaledVector(P0, 2 * t3 - 3 * t2 + 1)
+      .addScaledVector(m0, t3 - 2 * t2 + t)
+      .addScaledVector(P1, -2 * t3 + 3 * t2)
+      .addScaledVector(m1, t3 - t2);
+  };
+  const pointAt = (t) => {
+    const p = hermite(t);
+    const baseR = THREE.MathUtils.lerp(P0.length(), P1.length(), t);
+    const target = baseR * THREE.MathUtils.lerp(1, depthFraction, Math.sin(Math.PI * t));
+    const len = p.length();
+    if (len > 1e-9) p.multiplyScalar(target / len);
+    return p;
+  };
+
+  const twistRad = THREE.MathUtils.degToRad(twistDeg);
+  const stations = [];
+  let arc = 0;
+  let prevPt = null;
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const p = pointAt(t);
+    const tangent = pointAt(Math.min(t + 1e-3, 1)).sub(pointAt(Math.max(t - 1e-3, 0))).normalize();
+    const radial = p.clone().normalize();
+    let major = new THREE.Vector3().crossVectors(tangent, radial);
+    if (major.lengthSq() < 1e-10) major.set(1, 0, 0);
+    major.normalize();
+    let minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
+    const phi = twistRad * t;
+    const c = Math.cos(phi), s = Math.sin(phi);
+    const majorR = major.clone().multiplyScalar(c).addScaledVector(minor, s);
+    const minorR = new THREE.Vector3().crossVectors(tangent, majorR).normalize();
+    if (prevPt) arc += p.distanceTo(prevPt);
+    prevPt = p;
+    stations.push({
+      topA: p.clone().addScaledVector(majorR, halfWidth).addScaledVector(minorR, halfThickness),
+      topB: p.clone().addScaledVector(majorR, -halfWidth).addScaledVector(minorR, halfThickness),
+      botA: p.clone().addScaledVector(majorR, halfWidth).addScaledVector(minorR, -halfThickness),
+      botB: p.clone().addScaledVector(majorR, -halfWidth).addScaledVector(minorR, -halfThickness),
+      arc,
+    });
+  }
+
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  const addStrip = (vertPair, vPair) => {
+    const vbase = positions.length / 3;
+    for (let i = 0; i <= segments; i++) {
+      const s2 = stations[i];
+      const [va, vb] = vertPair(s2);
+      positions.push(va.x, va.y, va.z, vb.x, vb.y, vb.z);
+      uvs.push(s2.arc, vPair[0], s2.arc, vPair[1]);
+    }
+    for (let i = 0; i < segments; i++) {
+      const a = vbase + i * 2, b = a + 1, c2 = vbase + (i + 1) * 2, d = c2 + 1;
+      indices.push(a, c2, b, b, c2, d);
+    }
+  };
+  addStrip((s2) => [s2.topA, s2.topB], [halfWidth, -halfWidth]);
+  addStrip((s2) => [s2.botB, s2.botA], [-halfWidth, halfWidth]);
+  addStrip((s2) => [s2.topA, s2.botA], [0, halfThickness]);
+  addStrip((s2) => [s2.botB, s2.topB], [0, halfThickness]);
+
+  const pushCap = (station, flip) => {
+    const vbase = positions.length / 3;
+    const verts = [station.topA, station.topB, station.botB, station.botA];
+    for (const v of verts) { positions.push(v.x, v.y, v.z); uvs.push(0, 0); }
+    if (!flip) indices.push(vbase, vbase + 1, vbase + 2, vbase, vbase + 2, vbase + 3);
+    else indices.push(vbase, vbase + 2, vbase + 1, vbase, vbase + 3, vbase + 2);
+  };
+  pushCap(stations[0], false);
+  pushCap(stations[segments], true);
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return { geometry };
+}
+
 export function buildSpiralStar(face, params = {}) {
   const { armCount = 5, capRadiusFrac, starRotationDeg = 0, ...armParams } = params;
   const starRotationRad = THREE.MathUtils.degToRad(starRotationDeg);

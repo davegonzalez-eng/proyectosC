@@ -1,22 +1,17 @@
-// Option B prototype: the full 12-face dodecahedron, wearing the 5-arm
-// spiral-star motif (spiralarm.js) on every face, with adjacent faces'
-// arm tips connected by ribbons (ribbon.js) - the same fusion idea the
-// current 5-thin-arm sculpture (main.js) uses, reusing its exact adjacency
-// rule (computeAdjacentFaceConnections) unmodified.
+// Option B prototype: the full 12-face dodecahedron wearing the 5-arm
+// spiral-star motif - each star now built as ONE solid, smoothly-fused
+// sheet (buildSolidStar2D + mapSolidStarToFace in spiralarm.js) instead of
+// 5 overlapping slabs, with material presets and hex/coral perforation
+// patterns, and connected by ARM EXTENSIONS (buildArmExtension): each arm
+// continues past its tip, twisting counter-clockwise, to meet the arm of
+// the star it connects to - no separate ribbon shapes.
 //
-// This works because arm `i`'s tip (angleOffset = i * 360/armCount, at
-// theta=0) lands at EXACTLY the same direction from the face center as
-// the old star's arm `i` tip (face.vertices3D[i]) - verified standalone
-// under Node to 0.000 degrees of deviation. So the old adjacency rule's
-// "F<face>-A<arm>" labels, computed purely from vertex topology, transfer
-// directly: no new connection logic needed, just reusing the existing
-// pairs against this motif's own tip positions/tangents.
-//
-// Unlike the old system, there's no tube to cut short and fuse a ribbon
-// into - each arm already extends all the way to a real (if narrow) tip
-// point. So ribbons here connect directly tip-to-tip with no entryA/entryB
-// cut points, sized to match the arm's own tip half-width/thickness so the
-// seam is width- and thickness-continuous.
+// The connection pairs come from computeAdjacentFaceConnections() in
+// geometry.js, unchanged - the rule reverse-engineered from the user's
+// reference sequences for face 7 and face 1 in the original project
+// (F6-A0:F7-A2, F10-A1:F7-A3, F7-A4:F0-A3, F7-A0:F1-A3, F8-A0:F7-A1 ...).
+// The "Show labels" toggle displays each face/arm's F#-A# label so the
+// mapping can be audited and amended; the panel also lists all 60 pairs.
 //
 // A separate, standalone page (not wired into index.html/main.js) so the
 // current 60-thin-arm sculpture keeps working untouched while this is
@@ -24,10 +19,11 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from '../vendor/three/CSS2DRenderer.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
-import { buildDodecahedron, computeAdjacentFaceConnections, applySurfaceTwist, applyTipDip } from './geometry.js';
-import { buildSpiralStar } from './spiralarm.js';
-import { buildRibbon } from './ribbon.js';
+import { buildDodecahedron, computeAdjacentFaceConnections } from './geometry.js';
+import { buildSolidStar2D, mapSolidStarToFace, buildArmExtension } from './spiralarm.js';
+import { createPerforationTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
 
@@ -45,6 +41,13 @@ renderer.toneMappingExposure = 1.1;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 container.appendChild(renderer.domElement);
 
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(window.innerWidth, window.innerHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0px';
+labelRenderer.domElement.style.pointerEvents = 'none';
+container.appendChild(labelRenderer.domElement);
+
 const pmremGenerator = new THREE.PMREMGenerator(renderer);
 scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
 
@@ -56,100 +59,93 @@ keyLight.position.set(5, 6, 7);
 scene.add(keyLight);
 scene.add(new THREE.AmbientLight(0xffffff, 0.3));
 
-const starMaterial = new THREE.MeshStandardMaterial({
-  color: 0xf3f1ea,
-  roughness: 0.55,
-  metalness: 0.05,
-  side: THREE.DoubleSide,
-});
-const ribbonMaterial = new THREE.MeshStandardMaterial({
-  color: 0xf3f1ea,
-  roughness: 0.5,
-  metalness: 0.05,
-  side: THREE.DoubleSide,
-});
+// Material presets - same family as the main sculpture's, plus the warm
+// "golden" default the earlier hex-web study used.
+const MATERIAL_PRESETS = {
+  golden: { color: 0xffa640, metalness: 0.9, roughness: 0.28, envMapIntensity: 1 },
+  matteWhite: { color: 0xf4f1ea, metalness: 0.0, roughness: 0.95, envMapIntensity: 0.25 },
+  bronze: { color: 0xd7b978, metalness: 0.75, roughness: 0.32, envMapIntensity: 1 },
+  copper: { color: 0xf27a4d, metalness: 0.85, roughness: 0.3, envMapIntensity: 1 },
+  titanium: { color: 0x9aa0a6, metalness: 0.9, roughness: 0.45, envMapIntensity: 1 },
+  chrome: { color: 0xe8e9eb, metalness: 1.0, roughness: 0.08, envMapIntensity: 1 },
+  gunmetal: { color: 0x59616e, metalness: 0.9, roughness: 0.4, envMapIntensity: 1 },
+};
+
+// One shared material for stars AND extensions so the perforation pattern
+// reads as a single continuous surface across the joins.
+const sculptureMaterial = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
+
+function applyMaterialPreset(name) {
+  const p = MATERIAL_PRESETS[name] || MATERIAL_PRESETS.golden;
+  sculptureMaterial.color.setHex(p.color);
+  sculptureMaterial.metalness = p.metalness;
+  sculptureMaterial.roughness = p.roughness;
+  sculptureMaterial.envMapIntensity = p.envMapIntensity;
+  sculptureMaterial.needsUpdate = true;
+}
+
+function applyPattern() {
+  if (sculptureMaterial.alphaMap) sculptureMaterial.alphaMap.dispose();
+  if (sculptureMaterial.bumpMap) sculptureMaterial.bumpMap.dispose();
+  if (params.pattern === 'none' || params.holeSize <= 0.005) {
+    sculptureMaterial.alphaMap = null;
+    sculptureMaterial.bumpMap = null;
+    sculptureMaterial.alphaTest = 0;
+  } else {
+    const tex = createPerforationTexture({
+      cellPx: 28,
+      holeFrac: params.holeSize,
+      jitter: params.pattern === 'coral' ? 0.45 : 0,
+    });
+    // UVs are (u, w) in world units; repeat = pattern tiles per world unit.
+    tex.repeat.set(params.patternScale, params.patternScale);
+    sculptureMaterial.alphaMap = tex;
+    sculptureMaterial.bumpMap = tex;
+    sculptureMaterial.bumpScale = 0.02;
+    sculptureMaterial.alphaTest = 0.45;
+  }
+  sculptureMaterial.needsUpdate = true;
+}
 
 const RADIUS = 2;
 const faces = buildDodecahedron(RADIUS);
-// Purely topological (shared-vertex based), independent of arm shape/
-// distortion - the same rule + the same 60 pairs the current 5-thin-arm
-// sculpture uses, verified earlier to produce exact reference matches.
+// The same rule + 60 pairs the original 5-thin-arm sculpture uses, derived
+// from the user's reference connection sequences (see geometry.js).
 const connections = computeAdjacentFaceConnections(faces);
 
 const params = {
+  // Star shape (blend of this project's spiral-curl arms + the hex-web
+  // study's locked settings where they map).
+  starRotationDeg: 23,
+  tipScale: 1.05,
   turns: 0.1,
-  holeLoopTurns: 0,
   hubRadiusFrac: 0.02,
   bandHalfWidth: 0.25,
   tipWidthFrac: 0.3,
   widthTaperPower: 1,
   thickness: 0.015,
   tipThicknessFrac: 0.43,
-  bulgeStrength: 0.08,
-  // With tipScale > 1 the tips reach past their own face's edge; the tip
-  // dip pulls exactly those overreaching ends back toward the sphere
-  // center, so they duck UNDER the neighboring star's surface instead of
-  // hovering above it.
+  bulgeStrength: 0.19,
   tipDipStrength: 0.3,
   surfTwistDeg: -15,
-  // With rotation + reach + dip, the arms THEMSELVES weave under their
-  // neighbors - the separate ribbon connectors from the earlier tip-to-tip
-  // wiring are redundant visual clutter on top of that, so they default
-  // off (toggle below to compare).
-  showRibbons: false,
-  // Borrowed from the earlier Quin raymarched study ("OFFSET (star
-  // rotation)" there, default 23 deg): rotating every star about its own
-  // face normal makes each arm point at a GAP between two arms of the
-  // (equally rotated) neighboring star instead of at the shared pentagon
-  // vertex - the geometric precondition for arms diving under their
-  // neighbors. tipScale (that study's "TIP RADIUS") additionally lets the
-  // arms physically reach past their own face's edge into the neighbor's
-  // territory.
-  starRotationDeg: 23,
-  tipScale: 1.05,
-  ribbonWidthFactor: 1.15,
-  ribbonTwistTurns: 0.4,
-  ribbonDepthFraction: 0.94,
-  ribbonLeaveFraction: 0.06,
-  armpitRadiusFrac: 0.45,
-  armpitNeighborOffset: 1,
+  filletFrac: 0.06,
+  // Connections: arm extensions (hex-web study's EXT LENGTH = 0.62).
+  showExtensions: true,
+  extTwistDeg: 180,
+  extLengthFactor: 0.62,
+  extDepthFraction: 0.92,
+  // Appearance (hex-web study: golden, hex holes 0.24, scale 15 over a
+  // radius-2 sphere ~ 1.9 tiles per world unit).
+  material: 'golden',
+  pattern: 'hex',
+  holeSize: 0.24,
+  patternScale: 1.9,
+  showLabels: false,
 };
 
-/**
- * A point in the gap ("armpit") between arm `armIndex` and its neighbor
- * (`armIndex + neighborOffset`) on `face`, at radius `radiusFrac * R_out` -
- * NOT on any arm's surface. Built with the exact same bulge/twist/tip-dip
- * pipeline `buildSpiralStar`'s arms use (via the same `applySurfaceTwist`/
- * `applyTipDip` from geometry.js), so it sits on the same surface language,
- * just at an angle no arm actually sweeps through.
- *
- * Per user reference photos: a connection shouldn't land ON the
- * neighboring face's arm tip (that reads as the ribbon just butting into
- * the arm) - it should aim for this gap instead, then dip under the
- * neighboring star's body, the way the ribbon's own inward mid-dip
- * (`depthFraction` in ribbon.js) already pulls its middle inward relative
- * to its endpoints.
- */
-function armpitPoint(face, armIndex, neighborOffset, radiusFrac) {
-  const R = face.R_out;
-  // The neighbor's arms rotate with starRotationDeg, so its gaps do too -
-  // the armpit angle must track the same rotation the arms get.
-  const armAngle = (armIndex * Math.PI * 2) / 5 + THREE.MathUtils.degToRad(params.starRotationDeg);
-  const angle = armAngle + (neighborOffset * Math.PI * 2) / 5 / 2;
-  const r = R * radiusFrac;
-  const u = r * Math.cos(angle);
-  const w = r * Math.sin(angle);
-  const bulge = params.bulgeStrength ? params.bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
-  const surfTwistRad = THREE.MathUtils.degToRad(params.surfTwistDeg);
-  const world = face.center.clone().add(applySurfaceTwist(face, u, w, bulge, surfTwistRad));
-  applyTipDip(world, r, face, params.tipDipStrength);
-  return world;
-}
-
-const LABEL_RE = /^F(\d+)-A(\d+)$/;
-
 let starGroup = null;
-let ribbonGroup = null;
+let extGroup = null;
+let labelGroup = null;
 
 function disposeGroup(group) {
   group.traverse((obj) => {
@@ -157,93 +153,107 @@ function disposeGroup(group) {
   });
 }
 
+function makeLabel(text, cls) {
+  const div = document.createElement('div');
+  div.className = cls;
+  div.textContent = text;
+  return new CSS2DObject(div);
+}
+
+function setLabelsVisible(v) {
+  if (!labelGroup) return;
+  labelGroup.traverse((obj) => {
+    obj.visible = v;
+    if (obj.element) obj.element.style.display = v ? '' : 'none';
+  });
+  labelGroup.visible = true; // group itself stays on; children carry the toggle
+}
+
 function rebuild() {
-  if (starGroup) {
-    scene.remove(starGroup);
-    disposeGroup(starGroup);
+  for (const g of [starGroup, extGroup, labelGroup]) {
+    if (g) {
+      scene.remove(g);
+      disposeGroup(g);
+    }
   }
-  if (ribbonGroup) {
-    scene.remove(ribbonGroup);
-    disposeGroup(ribbonGroup);
-  }
-
   starGroup = new THREE.Group();
-  ribbonGroup = new THREE.Group();
+  extGroup = new THREE.Group();
+  labelGroup = new THREE.Group();
 
-  /** @type {Map<string, {position: THREE.Vector3, outDir: THREE.Vector3, tangent: THREE.Vector3, label: string}>} */
+  // The 2D star (field union of 5 arms + hub, marching squares,
+  // triangulation, subdivision) is identical for every face - built once.
+  const star2D = buildSolidStar2D(params, faces[0].R_out);
+
+  /** @type {Map<string, {tipPosition: THREE.Vector3, tipTangent: THREE.Vector3}>} */
   const tipsByLabel = new Map();
 
   for (const face of faces) {
-    const { geometry, arms } = buildSpiralStar(face, { armCount: 5, ...params });
-    starGroup.add(new THREE.Mesh(geometry, starMaterial));
+    const { geometry, arms } = mapSolidStarToFace(star2D, face, params);
+    starGroup.add(new THREE.Mesh(geometry, sculptureMaterial));
+
+    const faceLabel = makeLabel(`F${face.index}`, 'face-label');
+    faceLabel.position.copy(face.center.clone().multiplyScalar(1.12));
+    labelGroup.add(faceLabel);
 
     for (const arm of arms) {
-      const tipPos = arm.points[0].clone();
-      const nextPos = arm.points[1].clone();
-      // Points outward, continuing the arm's own trend past its tip - same
-      // convention geometry.js's buildStar uses for its own tip.tangent.
-      const tangent = tipPos.clone().sub(nextPos).normalize();
-      const outDir = tipPos.clone().sub(face.center).normalize();
       const label = `F${face.index}-A${arm.armIndex}`;
-      tipsByLabel.set(label, { position: tipPos, outDir, tangent, label });
+      tipsByLabel.set(label, arm);
+      const armLabel = makeLabel(`A${arm.armIndex}`, 'arm-label');
+      armLabel.position.copy(arm.tipPosition.clone().multiplyScalar(1.03));
+      labelGroup.add(armLabel);
     }
   }
 
   const R = faces[0].R_out;
   const tipHalfWidth = R * params.bandHalfWidth * params.tipWidthFrac;
-  const tipThickness = R * params.thickness * params.tipThicknessFrac;
+  const tipHalfThickness = (R * params.thickness * params.tipThicknessFrac) / 2;
 
   let missing = 0;
-  for (const { a, b } of (params.showRibbons ? connections : [])) {
-    const tipA = tipsByLabel.get(a);
-    const bMatch = b.match(LABEL_RE);
-    if (!tipA || !bMatch) {
-      missing++;
-      continue;
+  if (params.showExtensions) {
+    for (const { a, b } of connections) {
+      const tipA = tipsByLabel.get(a);
+      const tipB = tipsByLabel.get(b);
+      if (!tipA || !tipB) {
+        missing++;
+        continue;
+      }
+      const { geometry } = buildArmExtension(tipA, tipB, {
+        halfWidth: tipHalfWidth,
+        halfThickness: tipHalfThickness,
+        lengthFactor: params.extLengthFactor,
+        twistDeg: params.extTwistDeg,
+        depthFraction: params.extDepthFraction,
+      });
+      extGroup.add(new THREE.Mesh(geometry, sculptureMaterial));
     }
-    const faceB = faces[parseInt(bMatch[1], 10)];
-    const armIndexB = parseInt(bMatch[2], 10);
-    const landing = armpitPoint(faceB, armIndexB, params.armpitNeighborOffset, params.armpitRadiusFrac);
-    const landingOutDir = landing.clone().sub(faceB.center).normalize();
-    const tipB = { position: landing, outDir: landingOutDir, tangent: landingOutDir, label: b };
-
-    const { geometry } = buildRibbon(tipA, tipB, {
-      tubeRadius: tipHalfWidth,
-      halfWidth: tipHalfWidth * params.ribbonWidthFactor,
-      thickness: tipThickness,
-      endThickness: tipThickness,
-      twistTurns: params.ribbonTwistTurns,
-      depthFraction: params.ribbonDepthFraction,
-      // These arms barely curl (low `turns`), so each tip's own tangent
-      // points almost purely radially outward (measured ~97% aligned with
-      // outDir) rather than tangentially along the surface like the old
-      // thin-arm star's swirled tips did. Following that tangent for the
-      // usual leaveFraction launches the ribbon far outside the sphere
-      // before it curves back toward its neighbor, tangling the whole
-      // structure into a spiky cage - a much shorter leave keeps it close
-      // to the surface instead.
-      leaveFraction: params.ribbonLeaveFraction,
-    });
-    ribbonGroup.add(new THREE.Mesh(geometry, ribbonMaterial));
   }
 
+  // The vendored CSS2DRenderer checks each object's own `visible`, not its
+  // ancestors' - so toggle every label directly rather than the group.
+  setLabelsVisible(params.showLabels);
   scene.add(starGroup);
-  scene.add(ribbonGroup);
+  scene.add(extGroup);
+  scene.add(labelGroup);
 
   document.getElementById('metrics').innerHTML =
-    `Faces: ${faces.length}<br>` +
-    `Connections: ${params.showRibbons ? `${connections.length} ribbons${missing ? ` (${missing} missing tips!)` : ''}` : 'arms weave directly (ribbons off)'}<br>` +
-    `Tips resolved: ${tipsByLabel.size} / 60`;
+    `Faces: ${faces.length} | Tips: ${tipsByLabel.size}/60<br>` +
+    `Extensions: ${params.showExtensions ? `${connections.length - missing}${missing ? ` (${missing} missing!)` : ''}` : 'off'}`;
+
+  const listEl = document.getElementById('conn-list');
+  if (listEl) {
+    listEl.textContent = connections.map(({ a, b }) => `${a} -> ${b}`).join('\n');
+  }
 }
 
-function bindSlider(id, key) {
+function bindSlider(id, key, opts = {}) {
   const el = document.getElementById(id);
   const label = document.getElementById(`v-${key}`);
   el.addEventListener('input', () => {
     const v = parseFloat(el.value);
     params[key] = v;
-    label.textContent = v;
-    rebuild();
+    if (label) label.textContent = v;
+    if (opts.appearanceOnly) applyPattern();
+    else rebuild();
   });
 }
 
@@ -259,32 +269,49 @@ bindSlider('tipThicknessFrac', 'tipThicknessFrac');
 bindSlider('bulgeStrength', 'bulgeStrength');
 bindSlider('tipDipStrength', 'tipDipStrength');
 bindSlider('surfTwistDeg', 'surfTwistDeg');
-bindSlider('ribbonWidthFactor', 'ribbonWidthFactor');
-bindSlider('ribbonTwistTurns', 'ribbonTwistTurns');
-bindSlider('ribbonDepthFraction', 'ribbonDepthFraction');
-bindSlider('ribbonLeaveFraction', 'ribbonLeaveFraction');
-bindSlider('armpitRadiusFrac', 'armpitRadiusFrac');
-bindSlider('armpitNeighborOffset', 'armpitNeighborOffset');
+bindSlider('filletFrac', 'filletFrac');
+bindSlider('extTwistDeg', 'extTwistDeg');
+bindSlider('extLengthFactor', 'extLengthFactor');
+bindSlider('extDepthFraction', 'extDepthFraction');
+bindSlider('holeSize', 'holeSize', { appearanceOnly: true });
+bindSlider('patternScale', 'patternScale', { appearanceOnly: true });
 
-document.getElementById('showRibbons').addEventListener('change', (e) => {
-  params.showRibbons = e.target.checked;
+document.getElementById('material').addEventListener('change', (e) => {
+  params.material = e.target.value;
+  applyMaterialPreset(params.material);
+});
+document.getElementById('pattern').addEventListener('change', (e) => {
+  params.pattern = e.target.value;
+  applyPattern();
+});
+document.getElementById('showExtensions').addEventListener('change', (e) => {
+  params.showExtensions = e.target.checked;
   rebuild();
 });
+document.getElementById('showLabels').addEventListener('change', (e) => {
+  params.showLabels = e.target.checked;
+  setLabelsVisible(params.showLabels);
+});
 
+applyMaterialPreset(params.material);
+applyPattern();
 rebuild();
 
 window.__spiralDodeca = {
   params,
   setStarsVisible(v) { starGroup.visible = v; },
-  setRibbonsVisible(v) { ribbonGroup.visible = v; },
+  setExtensionsVisible(v) { extGroup.visible = v; },
   setParams(partial) {
     Object.assign(params, partial);
     for (const key of Object.keys(partial)) {
       const el = document.getElementById(key);
       const label = document.getElementById(`v-${key}`);
-      if (el) el.value = partial[key];
+      if (el && el.type === 'range') el.value = partial[key];
+      if (el && el.tagName === 'SELECT') el.value = partial[key];
       if (label) label.textContent = partial[key];
     }
+    applyMaterialPreset(params.material);
+    applyPattern();
     rebuild();
   },
 };
@@ -293,11 +320,13 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  labelRenderer.setSize(window.innerWidth, window.innerHeight);
 });
 
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
   renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
 }
 animate();
