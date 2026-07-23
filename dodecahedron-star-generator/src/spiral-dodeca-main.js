@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, buildHornArc, buildStarRim, mapArmCenterline, hornArcPointAt } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornArcPointAt } from './spiralarm.js';
 import { createPerforationTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -232,6 +232,7 @@ let extGroup = null;
 let rimGroup = null;
 let flyoverCurve = null;
 let flyoverLookOffsets = null;
+let flyoverNormals = null;
 
 // Debug face click-to-hide: which face indices are currently hidden,
 // surviving across rebuild() (which throws away and remakes every mesh on
@@ -259,21 +260,31 @@ function disposeGroup(group) {
 // first arm's outward tangent -> the tip itself) so the loop's first
 // beat reads as "approaches, tilts parallel to a star arm, and zooms in."
 //
-// Arm segments hover just OUTSIDE the star's external surface (a small
-// outward push, not inward) - the camera stays over the visible top of
-// the arms rather than diving under the shell, matching a "flies low
-// over the terrain" read; a constant gentle downward gaze tilt (applied
-// every frame in updateFlyoverCamera, not baked in here) reinforces that.
-// The horn-arc segments are the one place that genuinely dips underneath
-// a neighboring star (their own mid-span `depthFraction` squash already
-// does that) - "the small space where it goes underneath the adjacent
-// star" - so those points get a small sideways push (to the right,
-// relative to travel direction) baked into their position, windowed
-// smoothly across the arc (zero at both cusps) so it ramps in and out
-// rather than popping. `lookOffsets`, a parallel array of world-space
-// bias vectors (zero except across those same arc stretches, pointing
-// the opposite lateral direction - left), lets the per-frame lookAt
-// counter-tilt the gaze without needing a second geometry pass.
+// Arm segments hover just OUTSIDE the star's external surface along its
+// TRUE local normal (`mapArmCenterlineWithNormal`), not the sphere-radial
+// direction - measured up to ~27 degrees apart right where the exponential
+// tip-bend curls the surface near a tip, which is exactly where a radial
+// hover let the camera clip under the shell right after the approach.
+// Hovering along the real normal keeps the camera genuinely skimming the
+// visible top of the arm the whole way, tip included - reading as gliding
+// through the gap between one star's arm and its neighbor rather than
+// ducking beneath it. A constant gentle downward gaze tilt (applied every
+// frame in updateFlyoverCamera, adjustable live with Arrow Up/Down)
+// reinforces the "low flyover" read. The horn-arc segments are the one
+// place that genuinely dips underneath a neighboring star (their own
+// mid-span `depthFraction` squash already does that) - "the small space
+// where it goes underneath the adjacent star" - so those points get a
+// small sideways push (to the right, relative to travel direction) baked
+// into their position, windowed smoothly across the arc (zero at both
+// cusps) so it ramps in and out rather than popping. `lookOffsets`, a
+// parallel array of world-space bias vectors (zero except across those
+// same arc stretches, pointing the opposite lateral direction - left),
+// lets the per-frame lookAt counter-tilt the gaze without a second
+// geometry pass. `normals`, another parallel array (the true local normal
+// for arm points, sphere-radial as a fallback for the approach/arc points
+// which have no local (u,w) frame of their own), drives both the hover
+// offset already baked into `points` and the camera's own banking at
+// playback time.
 function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
   const R = star2D.R;
   const hoverFrac = 0.02; // hover just outside the arm's external surface
@@ -295,19 +306,28 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
 
   const points = [];
   const lookOffsets = [];
+  const normals = [];
   const zero = new THREE.Vector3();
-  const pushAll = (arr, offset = zero) => {
-    for (const p of arr) { points.push(p); lookOffsets.push(offset); }
+  const pushPoint = (p, normal, offset = zero) => {
+    points.push(p);
+    normals.push(normal);
+    lookOffsets.push(offset);
+  };
+  const pushArm = (frames, reverse) => {
+    const seq = reverse ? frames.slice().reverse() : frames;
+    for (const { point, normal } of seq) {
+      pushPoint(point.clone().addScaledVector(normal, hoverFrac * R), normal);
+    }
   };
 
   const startLabel = 'F0-A0';
   const startTip = tipsByLabel.get(startLabel);
   const outward0 = startTip.tipPosition.clone().normalize();
-  pushAll([
-    startTip.tipPosition.clone().addScaledVector(outward0, R * 5).add(new THREE.Vector3(R * 1.4, R * 0.7, 0)),
-    startTip.tipPosition.clone().addScaledVector(startTip.tipTangent, R * 1.1).addScaledVector(outward0, R * 0.6),
-    startTip.tipPosition.clone().addScaledVector(startTip.tipTangent, R * 0.25),
-  ]);
+  pushPoint(startTip.tipPosition.clone().addScaledVector(outward0, R * 5).add(new THREE.Vector3(R * 1.4, R * 0.7, 0)), outward0);
+  const midApproach = startTip.tipPosition.clone().addScaledVector(startTip.tipTangent, R * 1.1).addScaledVector(outward0, R * 0.6);
+  pushPoint(midApproach, midApproach.clone().normalize());
+  const closeApproach = startTip.tipPosition.clone().addScaledVector(startTip.tipTangent, R * 0.25);
+  pushPoint(closeApproach, closeApproach.clone().normalize());
 
   let currentLabel = startLabel;
   const numHops = 10;
@@ -316,15 +336,14 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
     const { faceIdx, armIdx } = parseLabel(currentLabel);
     const face = faces[faceIdx];
 
-    // (a) fly this arm tip -> hub, hovering just outside its external
-    // surface ("to the star face").
-    pushAll(mapArmCenterline(star2D, face, armIdx, params, -hoverFrac));
+    // (a) fly this arm tip -> hub, hovering just outside its true
+    // external surface ("to the star face").
+    pushArm(mapArmCenterlineWithNormal(star2D, face, armIdx, params), false);
 
     // (b) pick the next arm on the same face, fly hub -> tip, same
     // external hover ("back inside following the next arm").
     const nextArmIdx = (armIdx + 1) % armCount;
-    const hubToTip = mapArmCenterline(star2D, face, nextArmIdx, params, -hoverFrac).slice().reverse();
-    pushAll(hubToTip);
+    pushArm(mapArmCenterlineWithNormal(star2D, face, nextArmIdx, params), true);
 
     const nextLabel = `F${faceIdx}-A${nextArmIdx}`;
     const nextTip = tipsByLabel.get(nextLabel);
@@ -348,8 +367,7 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
       let right = new THREE.Vector3().crossVectors(tangent, outward);
       if (right.lengthSq() < 1e-10) right.set(1, 0, 0); else right.normalize();
       const w = Math.sin(Math.PI * s); // 0 at both cusps, 1 at mid-arc
-      points.push(p.clone().addScaledVector(right, R * 0.07 * w));
-      lookOffsets.push(right.clone().multiplyScalar(-R * 0.18 * w));
+      pushPoint(p.clone().addScaledVector(right, R * 0.07 * w), outward, right.clone().multiplyScalar(-R * 0.18 * w));
     }
 
     currentLabel = chosenLabel;
@@ -372,7 +390,7 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
   // intended far establishing shot). Enough divisions to comfortably
   // exceed the point count fixes it.
   curve.arcLengthDivisions = points.length * 4;
-  return { curve, lookOffsets };
+  return { curve, lookOffsets, normals };
 }
 
 function rebuild() {
@@ -450,7 +468,7 @@ function rebuild() {
     listEl.textContent = connections.map(({ a, b }) => `${a} -> ${b}`).join('\n');
   }
 
-  ({ curve: flyoverCurve, lookOffsets: flyoverLookOffsets } = buildFlyoverPath(star2D, faces, tipsByLabel, connections, params));
+  ({ curve: flyoverCurve, lookOffsets: flyoverLookOffsets, normals: flyoverNormals } = buildFlyoverPath(star2D, faces, tipsByLabel, connections, params));
 }
 
 function bindSlider(id, key, opts = {}) {
@@ -627,13 +645,20 @@ rebuild();
 // the camera was.
 const DEFAULT_CAMERA_POS = camera.position.clone();
 const FLYOVER_DURATION_S = 34; // nominal lap time at speed = 1
-const FLYOVER_DOWNWARD_TILT_FRAC = 0.1; // constant gentle "look slightly down at the terrain" bias
+const FLYOVER_DOWNWARD_TILT_FRAC = 0.1; // baseline "look slightly down at the terrain" bias
+const FLYOVER_TILT_STEP = 0.03; // per-keypress Arrow Up/Down nudge
+const FLYOVER_TILT_MAX = 0.4; // clamp so the gaze can't flip past looking straight up/down
 // Position along the loop (0..1) and the wall-clock time it was last
 // advanced - kept as running state (not derived from a single start
 // timestamp) so `flyoverSpeed` can change - including going negative, for
 // rewinding, or 0, to pause - at any moment without discontinuities.
 let flyoverT = 0;
 let flyoverLastMs = null;
+// User-adjustable ADD-ON to the baseline downward tilt (Arrow Down adds,
+// Arrow Up subtracts) - lets the gaze go from looking below the sphere's
+// "horizon" (down into the surface) to above it (out past the rim), on
+// top of whatever baseline tilt this build already has.
+let flyoverTiltOffset = 0;
 function setFlyoverMode(on) {
   params.flyoverMode = on;
   controls.enabled = !on;
@@ -646,6 +671,27 @@ function setFlyoverMode(on) {
     controls.target.set(0, 0, 0);
     controls.update();
   }
+}
+window.addEventListener('keydown', (e) => {
+  if (!params.flyoverMode) return;
+  if (e.key === 'ArrowDown') {
+    flyoverTiltOffset = Math.min(FLYOVER_TILT_MAX, flyoverTiltOffset + FLYOVER_TILT_STEP);
+    e.preventDefault();
+  } else if (e.key === 'ArrowUp') {
+    flyoverTiltOffset = Math.max(-FLYOVER_TILT_MAX, flyoverTiltOffset - FLYOVER_TILT_STEP);
+    e.preventDefault();
+  }
+});
+// Linear-interpolated lookup into one of the parallel per-point arrays
+// (lookOffsets, normals) at the curve's raw parameter `u` - shared by both
+// since they're built with exactly the same length/order as `points`.
+function sampleFlyoverArray(arr, u) {
+  const n = arr.length;
+  const idxF = u * n;
+  const i0 = Math.floor(idxF) % n;
+  const i1 = (i0 + 1) % n;
+  const frac = idxF - Math.floor(idxF);
+  return arr[i0].clone().lerp(arr[i1], frac);
 }
 function updateFlyoverCamera() {
   if (!flyoverCurve) return;
@@ -660,29 +706,32 @@ function updateFlyoverCamera() {
   const dir = params.flyoverSpeed < 0 ? -1 : 1; // look the way we're actually travelling, even in reverse
   const pos = flyoverCurve.getPointAt(flyoverT);
   const lookPos = flyoverCurve.getPointAt((flyoverT + dir * 0.003 + 1) % 1);
+  const u = flyoverCurve.getUtoTmapping(flyoverT);
+
+  // The true local surface normal at this point (interpolated between the
+  // two nearest baked-in samples) - used for both banking (up) and the
+  // downward-tilt reference, instead of the sphere-radial approximation,
+  // so both track the actual curled surface near a tip rather than the
+  // sphere's geometric center.
+  const normal = sampleFlyoverArray(flyoverNormals, u).normalize();
 
   // Blend in the baked-in lateral gaze bias (left, during horn-arc
-  // "underneath the adjacent star" passes; zero elsewhere) - looked up at
-  // the same raw curve parameter the position sample maps to, so it lines
-  // up with the arc stretches that baked in the matching rightward
-  // position shift.
-  const u = flyoverCurve.getUtoTmapping(flyoverT);
-  const n = flyoverLookOffsets.length;
-  const idxF = u * n;
-  const i0 = Math.floor(idxF) % n;
-  const i1 = (i0 + 1) % n;
-  const frac = idxF - Math.floor(idxF);
-  lookPos.add(flyoverLookOffsets[i0].clone().lerp(flyoverLookOffsets[i1], frac));
+  // "underneath the adjacent star" passes; zero elsewhere), looked up at
+  // the same raw curve parameter so it lines up with the arc stretches
+  // that baked in the matching rightward position shift.
+  lookPos.add(sampleFlyoverArray(flyoverLookOffsets, u));
 
-  // Constant gentle downward tilt - like a low-altitude flyover looking a
-  // touch toward the terrain rather than dead level along the flight path.
-  lookPos.addScaledVector(pos.clone().normalize(), -FLYOVER_DOWNWARD_TILT_FRAC * faces[0].R_out);
+  // Downward tilt - like a low-altitude flyover looking a touch toward the
+  // terrain rather than dead level along the flight path - baseline plus
+  // whatever the user has nudged live with Arrow Up/Down.
+  lookPos.addScaledVector(normal, -(FLYOVER_DOWNWARD_TILT_FRAC + flyoverTiltOffset) * faces[0].R_out);
 
   camera.position.copy(pos);
-  // Bank toward the local outward radial direction rather than a fixed
-  // world-up, so the camera tilts naturally as it hugs the sphere/arm
-  // surface instead of rolling awkwardly through the dive-in/out turns.
-  camera.up.copy(pos.clone().normalize());
+  // Bank toward the true local surface normal rather than a fixed
+  // world-up (or the coarser sphere-radial approximation), so the camera
+  // tilts naturally as it hugs the sphere/arm surface instead of rolling
+  // awkwardly through the dive-in/out turns.
+  camera.up.copy(normal);
   camera.lookAt(lookPos);
 }
 

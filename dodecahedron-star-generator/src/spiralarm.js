@@ -702,6 +702,36 @@ export function mapArmCenterline(star2D, face, armIndex, params = {}, inset = 0)
 }
 
 /**
+ * Like `mapArmCenterline`, but also returns the TRUE local surface normal
+ * at every sample (finite difference in (u, w) - the same technique
+ * `mapSolidStarToFace` uses for its own vertex normals), instead of just
+ * the sphere-radial direction. Near a tip, where the exponential tip-bend
+ * (`tipBendRotate`/`tipBendDip`) curls the surface sharply, the true
+ * normal diverges from radial by up to ~27 degrees (measured) - enough
+ * that hovering "outward" along the radial direction can still land the
+ * camera on the wrong side of (or clipping through) the actual curled
+ * surface right where the arm meets its horn-triangle tip. Hovering along
+ * the true normal instead keeps a flyover camera genuinely above the
+ * external surface everywhere along the arm, tip included.
+ * @returns {{point: THREE.Vector3, normal: THREE.Vector3}[]} tip-first
+ */
+export function mapArmCenterlineWithNormal(star2D, face, armIndex, params = {}) {
+  const pts2D = star2D.armPolylines2D[armIndex];
+  const R = star2D.R;
+  const eps = R * 1e-3;
+  return pts2D.map(({ x, y }) => {
+    const p0 = mapStarPoint(x, y, R, face, params);
+    const pu = mapStarPoint(x + eps, y, R, face, params).sub(mapStarPoint(x - eps, y, R, face, params));
+    const pw = mapStarPoint(x, y + eps, R, face, params).sub(mapStarPoint(x, y - eps, R, face, params));
+    const normal = new THREE.Vector3().crossVectors(pu, pw);
+    if (normal.lengthSq() < 1e-16) normal.copy(p0).normalize();
+    else normal.normalize();
+    if (normal.dot(face.normal) < 0) normal.negate();
+    return { point: p0, normal };
+  });
+}
+
+/**
  * Map a `buildSolidStar2D` result onto one face: top/bottom sheets offset
  * along the local surface normal, side walls around every boundary loop,
  * UV = (u, w) world coordinates. Also returns each arm's world tip

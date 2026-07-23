@@ -1266,6 +1266,56 @@ test speed: the tour now reads as flying low over the visible arm surface
 with the horn triangles passing underneath, rather than threading through
 the interior.
 
+## 22. Flyover fix: true-normal hover (was ducking under the star) + live tilt control
+
+Follow-up feedback on §21's external-hover path: "the current flyover
+trajectory approaches the star, and ends up going under the star right
+away."
+
+**Root cause.** The hover offset was applied along the sphere-RADIAL
+direction (`p.clone().normalize()`) - a fine approximation over most of a
+face, but measured (standalone under Node) to diverge from the star's TRUE
+local surface normal by up to ~27 degrees right where the exponential
+tip-bend (`tipBendRotate`/`tipBendDip`) curls the surface sharply near a
+tip. A small hover pushed "outward" along the wrong (radial) direction at
+that steep a mismatch is enough to read as clipping under the shell right
+after the approach lands - exactly the reported symptom, and exactly where
+it was reported (immediately, at the first tip).
+
+**Fix.** New `mapArmCenterlineWithNormal()` in spiralarm.js returns each
+arm sample's TRUE local normal (finite difference in (u, w), the same
+technique `mapSolidStarToFace` already uses for its own vertex normals),
+not just the sphere-radial direction. `buildFlyoverPath` now hovers along
+this true normal, and also threads it through as a third parallel array
+(`normals`, alongside `points` and `lookOffsets`) so `updateFlyoverCamera`
+can look up an interpolated true normal at any point along the curve (via
+the same `getUtoTmapping` + lerp technique `lookOffsets` already used) and
+use it for BOTH the hover already baked into position and the camera's own
+banking (`camera.up`) - previously the coarser radial approximation.
+Horn-arc points, which have no local (u, w) frame of their own, keep the
+radial approximation as a reasonable fallback (they're not meant to hug a
+specific star's surface anyway - they deliberately dip under).
+
+**Live tilt control.** Arrow Up/Down adjust a running `flyoverTiltOffset`
+(step 0.03, clamped to +-0.4) added to the baseline downward-gaze bias,
+so the view can go from looking below the sphere's "horizon" (down into
+the surface, toward the lamp core) to above it (out past the rim into
+open space) at any point during the tour, without stopping playback.
+Keys only respond while flyover mode is on.
+
+Checked standalone under Node: zero NaN across all points/normals/
+look-offsets in the rebuilt path. Checked in headless Chromium using a
+`performance.now()` monkey-patch in the TEST harness (two-phase - anchor
+a timestamp, then jump it forward and re-freeze - needed because a
+single frozen value never advances `flyoverT`, an artifact of the running-
+state timing model, not a bug in it) to capture deterministic frames
+across the approach and first two hops: the tour now reads as gliding
+just above the external surface with no visible dip under the shell.
+A tilt A/B test (freezing playback at a fixed point, then sending 6x
+Arrow Down and 12x Arrow Up) confirmed the gaze swings from looking down
+through the perforations at the lamp core to looking up past the horizon
+into open space, as intended.
+
 ## File layout
 
 ```
