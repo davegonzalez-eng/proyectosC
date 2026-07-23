@@ -38,13 +38,13 @@
   <div id="scene-container"></div>
   <div id="panel">
     <h1>Option B prototype: 5-arm spiral star</h1>
-    <p class="sub">A single face rendered in isolation: 5 rotationally-symmetric wide, logarithmic-spiral arms (one per pentagon vertex), each curling partway to the center and continuously tapering to a point (not staying constant-width). Not wired into the full dodecahedron yet. Set "Hole loop turns" above 0 to close each tip into a small terminal eye-hole instead of a plain point.</p>
+    <p class="sub">A single face rendered in isolation: 5 rotationally-symmetric logarithmic-spiral arms (one per pentagon vertex), each narrow at its outward tip and widening continuously toward the center, where all 5 overlap into a solid hub with no gap - like a real 5-pointed star, not a pinwheel of paddles. Not wired into the full dodecahedron yet.</p>
 
     <div class="row"><label><span>Arm count</span><span id="v-armCount">5</span></label><input id="armCount" type="range" min="3" max="8" step="1" value="5"></div>
     <div class="row"><label><span>Turns per arm</span><span id="v-turns">0.15</span></label><input id="turns" type="range" min="0.05" max="1.5" step="0.05" value="0.15"></div>
-    <div class="row"><label><span>Hole loop turns</span><span id="v-holeLoopTurns">0</span></label><input id="holeLoopTurns" type="range" min="0" max="1" step="0.05" value="0"></div>
-    <div class="row"><label><span>Hole radius / R_out (tip target radius)</span><span id="v-rHoleFrac">0.04</span></label><input id="rHoleFrac" type="range" min="0.02" max="0.45" step="0.01" value="0.04"></div>
-    <div class="row"><label><span>Band half-width / R_out (max width)</span><span id="v-bandHalfWidth">0.145</span></label><input id="bandHalfWidth" type="range" min="0.02" max="0.25" step="0.005" value="0.145"></div>
+    <div class="row"><label><span>Hole loop turns (see note below)</span><span id="v-holeLoopTurns">0</span></label><input id="holeLoopTurns" type="range" min="0" max="1" step="0.05" value="0"></div>
+    <div class="row"><label><span>Hub radius / R_out</span><span id="v-hubRadiusFrac">0.04</span></label><input id="hubRadiusFrac" type="range" min="0.02" max="0.45" step="0.01" value="0.04"></div>
+    <div class="row"><label><span>Band half-width / R_out (hub width)</span><span id="v-bandHalfWidth">0.145</span></label><input id="bandHalfWidth" type="range" min="0.02" max="0.25" step="0.005" value="0.145"></div>
     <div class="row"><label><span>Tip width fraction</span><span id="v-tipWidthFrac">0.08</span></label><input id="tipWidthFrac" type="range" min="0" max="1" step="0.01" value="0.08"></div>
     <div class="row"><label><span>Width taper power</span><span id="v-widthTaperPower">1.2</span></label><input id="widthTaperPower" type="range" min="0.4" max="3" step="0.05" value="1.2"></div>
     <div class="row"><label><span>Thickness / R_out</span><span id="v-thickness">0.055</span></label><input id="thickness" type="range" min="0.01" max="0.12" step="0.005" value="0.055"></div>
@@ -52,6 +52,8 @@
     <div class="row"><label><span>Bulge strength</span><span id="v-bulgeStrength">0.15</span></label><input id="bulgeStrength" type="range" min="0" max="0.6" step="0.01" value="0.15"></div>
     <div class="row"><label><span>Tip-dip strength</span><span id="v-tipDipStrength">0</span></label><input id="tipDipStrength" type="range" min="0" max="0.8" step="0.01" value="0"></div>
     <div class="row"><label><span>Surface twist (deg)</span><span id="v-surfTwistDeg">90</span></label><input id="surfTwistDeg" type="range" min="0" max="90" step="1" value="90"></div>
+
+    <p class="sub" style="margin-top:12px">Note: "Hole loop turns" doesn't currently close a terminal eye-hole - since the band is now widest at the hub, a loop past that point continues at full width instead of narrowing into an open ring. Revisit this if/when the eye-hole is reintroduced.</p>
 
     <div id="metrics"></div>
   </div>

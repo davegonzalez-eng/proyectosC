@@ -573,6 +573,47 @@ console errors; straight-on view shows 5 arms each clearly tapering from a
 wide head to a fine point; angled view confirms the taper holds up with
 the slab's real thickness and the surface twist's 3D curl.
 
+### 13c. Taper direction was backwards, plus a hub-gap fix
+
+User feedback on §13b's result: the silhouette read right, but the taper
+ran the wrong way. "Tip" in the rest of this codebase (`geometry.js`'s
+`star.tips`, `applyTipDip`) always means the OUTER point of an arm; §13b's
+`buildSpiralBand` had it backwards, treating the spiral's INNER end (near
+the face center) as the "tip" and tapering the width down to a point
+*there* - the opposite of a real 5-pointed star, which is narrow at each
+outward point and solid/overlapping at the body where the points meet
+near the center.
+
+Fixed by reversing the taper and renaming to match: `tipWidthFrac` /
+`tipThicknessFrac` now apply at `theta=0` (the rim/outer point, matching
+`star.tips`), and the taper runs `Math.pow(t / spiralFrac, widthTaperPower)`
+from there UP to full `bandHalfWidth`/`thickness` at the **hub** (renamed
+from `rHoleFrac` -> `hubRadiusFrac`, since with this direction it's no
+longer a "hole" target but the wide body's center point). The old
+`startHalfWidthFrac`/`startThicknessFrac` rim-attachment ramp was removed
+entirely - no longer needed, since `theta=0` is now already the correct
+narrow tip value with nothing to ramp from.
+
+That surfaced a second, smaller issue: even at full taper width, each
+arm's wide hub end sits AT `hubRadiusFrac`, not through the exact center -
+with 5 arms rotated evenly, their hub ends form a tiny regular pentagon
+around the center rather than meeting there, leaving a hairline gap.
+Rather than chase that through more taper-curve tuning, `buildHubCap()`
+explicitly fills a small disc (radius `capRadiusFrac`, default 1.5x
+`hubRadiusFrac` - comfortably inside where the arms' own taper is already
+most of the way to full width) at the same thickness/bulge as the arms,
+and `buildSpiralStar()` merges it in - guaranteeing a solid, gap-free
+center regardless of exactly how the 5 arms' tapers line up.
+
+Checked standalone under Node: zero NaN/Infinity; sampling the same 8
+points along one arm now gives 0.014, 0.019, 0.024, 0.045, 0.085, 0.129,
+0.157, 0.176 - **strictly increasing** from tip to hub, confirming the
+taper direction is correct. Checked in headless Chromium: zero console
+errors; straight-on view shows narrow tips at the pentagon's rim widening
+continuously into a solid, visibly gap-free hub at the center; angled view
+confirms the fix holds up with real slab thickness and the 90° surface
+twist's 3D curl.
+
 ## File layout
 
 ```

@@ -68,7 +68,7 @@ const params = {
   armCount: 5,
   turns: 0.15,
   holeLoopTurns: 0,
-  rHoleFrac: 0.04,
+  hubRadiusFrac: 0.04,
   bandHalfWidth: 0.145,
   tipWidthFrac: 0.08,
   widthTaperPower: 1.2,
@@ -93,7 +93,7 @@ function rebuild() {
     `Arms: ${arms.length}<br>` +
     `Band width / face radius: ${m.bandWidthOverFaceRadius.toFixed(3)}<br>` +
     `Per-arm turning angle: ${m.totalTurningDeg.toFixed(0)}&deg;<br>` +
-    `Hole radius / band width: ${m.holeRadiusOverBandWidth.toFixed(2)}`;
+    `Hub radius / band width: ${m.hubRadiusOverBandWidth.toFixed(2)}`;
 }
 
 function bindSlider(id, key) {
@@ -110,7 +110,7 @@ function bindSlider(id, key) {
 bindSlider('armCount', 'armCount');
 bindSlider('turns', 'turns');
 bindSlider('holeLoopTurns', 'holeLoopTurns');
-bindSlider('rHoleFrac', 'rHoleFrac');
+bindSlider('hubRadiusFrac', 'hubRadiusFrac');
 bindSlider('bandHalfWidth', 'bandHalfWidth');
 bindSlider('tipWidthFrac', 'tipWidthFrac');
 bindSlider('widthTaperPower', 'widthTaperPower');
