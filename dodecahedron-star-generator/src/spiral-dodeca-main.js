@@ -178,46 +178,43 @@ const connections = computeAdjacentFaceConnections(faces);
 
 const params = {
   // Star shape - user's preferred settings from the live panel.
-  starRotationDeg: 27,
-  tipScale: 1.4,
+  starRotationDeg: 29,
+  tipScale: 1.28,
   turns: 0.1,
   hubRadiusFrac: 0.24,
-  bandHalfWidth: 0.29,
-  tipWidthFrac: 0.44,
+  bandHalfWidth: 0.23,
+  tipWidthFrac: 0.12,
   widthTaperPower: 0.9,
   thickness: 0.015,
-  tipThicknessFrac: 0.22,
-  bulgeStrength: 0.04,
-  tipDipStrength: 0.55,
-  surfTwistDeg: -53,
-  filletFrac: 0.06,
+  tipThicknessFrac: 0.17,
+  bulgeStrength: 0.16,
+  tipDipStrength: 0.29,
+  surfTwistDeg: -3,
+  filletFrac: 0.1,
   subdivisions: 3,
   // Exponential tip bend: an extra dip + twist concentrated in just the
   // last stretch before an arm's tip, so its plane already roughly
   // matches the extension's incoming plane instead of meeting it near
   // perpendicular.
   tipBendStrength: 0.12,
-  tipBendTwistDeg: 7,
-  tipBendPower: 7,
-  // Connections: arm extensions, now a calligraphic hairpin (loop near the
+  tipBendTwistDeg: 37,
+  tipBendPower: 5,
+  // Connections: arm extensions, a calligraphic hairpin (loop near the
   // tip, then a bridge to the target tip) rather than a single smooth arc.
-  // (Screenshot had this unchecked, but that reads as a temporary
-  // debugging state while isolating the star shape - defaulting back on
-  // since the connections are the whole point of this round of changes.)
-  showExtensions: true,
-  extTwistDeg: -195,
-  extLengthFactor: 0.38,
-  extDepthFraction: 0.85,
-  extLoopRadiusFactor: 3.5,
-  extLoopSweepDeg: 200,
-  extLoopTFraction: 0.3,
+  showExtensions: false,
+  extTwistDeg: 0,
+  extLengthFactor: 0.15,
+  extDepthFraction: 0.95,
+  extLoopRadiusFactor: 1,
+  extLoopSweepDeg: 180,
+  extLoopTFraction: 0.1,
   // Rim bead tracing every boundary edge (outer silhouette + gaps),
   // like the earlier Quin study's RIM_W/RIM_PROUD.
   showRim: true,
-  rimWidthFrac: 0.05,
-  rimProudFrac: 0.015,
+  rimWidthFrac: 0.02,
+  rimProudFrac: 0.02,
   // Appearance.
-  material: 'matteClay',
+  material: 'golden',
   pattern: 'hex',
   holeSize: 0.24,
   patternScale: 3.2,
@@ -225,11 +222,11 @@ const params = {
   lampIntensity: 19,
   showLabels: false,
   // Debug: click a face to hide it (its star sheet + rim).
-  debugFacePick: false,
+  debugFacePick: true,
   // Cross-section clipping plane.
   clipEnabled: false,
-  clipAxis: 'y',
-  clipOffset: 0,
+  clipAxis: 'z',
+  clipOffset: -0.22,
   clipFlip: false,
 };
 
