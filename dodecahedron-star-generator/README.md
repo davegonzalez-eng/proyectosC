@@ -951,6 +951,80 @@ solid rim along every outline and internal gap; switching to
 with a visibly darkened background and warm light shining through the
 perforation holes, matching the reference photo's intent.
 
+## 18. Calligraphic hairpin extensions, cross-section plane, face debug picking, settings export
+
+A reference sheet of cursive practice strokes (down-stroke, tight loop,
+up-stroke) prompted a rework of the connector shape itself, plus three
+workflow tools requested alongside it.
+
+**Calligraphic hairpin extensions.** `buildArmExtension` previously bridged
+tip A to tip B with one smooth Hermite curve. Rewritten as two tangent-
+matched analytic pieces: a circular-arc LOOP that departs tip A along its
+own outward tangent (continuing the arm's own direction, the "down-stroke"),
+sweeps `loopSweepDeg` (default 200 - comfortably under a full turn) around a
+center offset sideways by `loopRadius` (sized off the tip's own half-width,
+`loopRadiusFactor * halfWidth`, clamped to at most 35% of the straight-line
+span so it can't dwarf a short connection), and exits pointing back roughly
+the way it came, offset by up to 2x its radius - the hairpin. From there the
+same Hermite BRIDGE as before continues to tip B. Both pieces share one
+continuous tangent field (the bridge's Hermite tangent at its start is built
+from the loop's own exit tangent), so the cross-section frame and the eased
+twist ramp stay seamless across the seam, and the mid-span inward dip still
+applies over the connector's overall parameter so it still passes under
+whatever it crosses. New params: `loopRadiusFactor` (0.5-8, default 3.5),
+`loopSweepDeg` (90-300, default 200), `loopTFraction` (0.1-0.5, default 0.3 -
+how much of the connector's parameter budget is the loop vs. the bridge).
+Checked standalone under Node across all 60 connections: zero NaN/Infinity,
+loop radius correctly clamped by span. Checked visually with a throwaway
+isolated single-connector viewer (built, screenshotted from three
+orientations, then deleted): the shape reads exactly as intended - a
+paisley-like loop at the tip continuing into a long sweeping bridge, not a
+corkscrew.
+
+**Cross-section "pane".** A single `THREE.Plane` + `PlaneHelper`, sliceable
+along X/Y/Z with an offset slider and a flip-side checkbox, applied via
+`material.clippingPlanes` on the shared sculpture/rim materials (needs
+`renderer.localClippingEnabled = true`). Lets the internal structure and the
+lamp core be inspected without the outer shell in the way. Verified with a
+before/after screenshot at a large offset: the bottom half of the sphere is
+correctly discarded, plane helper visible at the true cut location.
+
+**Click-to-hide faces (debug).** A "Click a face to hide it" checkbox arms a
+raycaster against the star sheets; clicking toggles that face's star mesh
+and rim mesh invisible, distinguishing an actual click from an orbit-drag
+by pointer-travel distance (>4px = drag, ignored). The hidden-face set lives
+outside `rebuild()` so it survives every parameter change re-triggering a
+full mesh rebuild. Verified with a pixel diff between before/after
+screenshots: clicking toggled exactly the region under the cursor, turning
+two previously-lit gap openings dark (the hidden face's geometry no longer
+occludes the interior).
+
+**Settings-table export.** A "Copy settings table" button serializes every
+current `params` entry into a copy-pasteable markdown table, written into a
+read-only textarea (auto-selected for a manual copy fallback) and copied to
+the clipboard via `navigator.clipboard.writeText`. Verified in headless
+Chromium: clicking the button set the textarea's content, showed a "Copied
+to clipboard!" status, and a `clipboard.readText()` round-trip matched the
+textarea's content exactly.
+
+**Panel/params sync bug, found while verifying the above.** The panel kept
+showing stale values (e.g. "Bronze" and an unchecked lamp-mode box) even
+though `matteClay` + lamp mode were actually being rendered - confirmed by
+sampling rendered pixel colors, which matched `matteClay`/lamp-on exactly.
+Root cause: nothing ever pushed the real `params` defaults into their DOM
+controls at page load; the HTML's own hardcoded `value`/`checked`/`selected`
+attributes are just a static starting point for markup readability and
+drift out of sync with the actual JS defaults. Fixed by factoring the sync
+logic `setParams` already had into a `syncControl(key)` helper, called once
+for every param at startup.
+
+Defaults updated to the user's latest tuned screenshot: `starRotationDeg=27`,
+`tipScale=1.4`, `hubRadiusFrac=0.24`, `bandHalfWidth=0.29`,
+`tipThicknessFrac=0.22`, `bulgeStrength=0.04`, `tipDipStrength=0.55`,
+`tipBendTwistDeg=7`, `tipBendPower=7`, `rimProudFrac=0.015`,
+`extTwistDeg=-195`, `material='matteClay'`, `lampMode=true`,
+`lampIntensity=19`.
+
 ## File layout
 
 ```

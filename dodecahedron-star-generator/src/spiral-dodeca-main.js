@@ -84,6 +84,32 @@ function applyLampMode(on) {
   scene.background.setHex(on ? 0x05060a : 0x14161c);
 }
 
+// Cross-section "pane": a single clipping plane, sliceable along any axis,
+// so the internal structure (and the lamp core) can be inspected without
+// the outer shell in the way. Shared across the sculpture's two materials;
+// three.js discards fragments on the plane's negative side.
+renderer.localClippingEnabled = true;
+const clipPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const clipHelper = new THREE.PlaneHelper(clipPlane, 6, 0x7fd1ff);
+clipHelper.visible = false;
+scene.add(clipHelper);
+
+function applyClipping() {
+  const axisVec = {
+    x: new THREE.Vector3(1, 0, 0),
+    y: new THREE.Vector3(0, 1, 0),
+    z: new THREE.Vector3(0, 0, 1),
+  }[params.clipAxis];
+  clipPlane.normal.copy(axisVec).multiplyScalar(params.clipFlip ? -1 : 1);
+  clipPlane.constant = -params.clipOffset * (params.clipFlip ? -1 : 1);
+  const planes = params.clipEnabled ? [clipPlane] : null;
+  for (const mat of [sculptureMaterial, rimMaterial]) {
+    mat.clippingPlanes = planes;
+    mat.needsUpdate = true;
+  }
+  clipHelper.visible = params.clipEnabled;
+}
+
 // Material presets - the full set from the earlier Quin raymarched study,
 // translated to metalness/roughness for MeshStandardMaterial.
 const MATERIAL_PRESETS = {
@@ -152,17 +178,17 @@ const connections = computeAdjacentFaceConnections(faces);
 
 const params = {
   // Star shape - user's preferred settings from the live panel.
-  starRotationDeg: 33,
-  tipScale: 1.35,
+  starRotationDeg: 27,
+  tipScale: 1.4,
   turns: 0.1,
-  hubRadiusFrac: 0.18,
-  bandHalfWidth: 0.24,
+  hubRadiusFrac: 0.24,
+  bandHalfWidth: 0.29,
   tipWidthFrac: 0.44,
   widthTaperPower: 0.9,
   thickness: 0.015,
-  tipThicknessFrac: 0.17,
-  bulgeStrength: 0.14,
-  tipDipStrength: 0.47,
+  tipThicknessFrac: 0.22,
+  bulgeStrength: 0.04,
+  tipDipStrength: 0.55,
   surfTwistDeg: -53,
   filletFrac: 0.06,
   subdivisions: 3,
@@ -171,35 +197,55 @@ const params = {
   // matches the extension's incoming plane instead of meeting it near
   // perpendicular.
   tipBendStrength: 0.12,
-  tipBendTwistDeg: 30,
-  tipBendPower: 5,
-  // Connections: arm extensions. (Screenshot had this unchecked, but that
-  // reads as a temporary debugging state while isolating the star shape -
-  // defaulting back on since it's the actual point of the connections and
-  // the tip-bend fix below needs it visible to judge.)
+  tipBendTwistDeg: 7,
+  tipBendPower: 7,
+  // Connections: arm extensions, now a calligraphic hairpin (loop near the
+  // tip, then a bridge to the target tip) rather than a single smooth arc.
+  // (Screenshot had this unchecked, but that reads as a temporary
+  // debugging state while isolating the star shape - defaulting back on
+  // since the connections are the whole point of this round of changes.)
   showExtensions: true,
-  extTwistDeg: -70,
+  extTwistDeg: -195,
   extLengthFactor: 0.38,
   extDepthFraction: 0.85,
+  extLoopRadiusFactor: 3.5,
+  extLoopSweepDeg: 200,
+  extLoopTFraction: 0.3,
   // Rim bead tracing every boundary edge (outer silhouette + gaps),
   // like the earlier Quin study's RIM_W/RIM_PROUD.
   showRim: true,
   rimWidthFrac: 0.05,
-  rimProudFrac: 0.035,
+  rimProudFrac: 0.015,
   // Appearance.
-  material: 'bronze',
+  material: 'matteClay',
   pattern: 'hex',
   holeSize: 0.24,
   patternScale: 3.2,
-  lampMode: false,
-  lampIntensity: 25,
+  lampMode: true,
+  lampIntensity: 19,
   showLabels: false,
+  // Debug: click a face to hide it (its star sheet + rim).
+  debugFacePick: false,
+  // Cross-section clipping plane.
+  clipEnabled: false,
+  clipAxis: 'y',
+  clipOffset: 0,
+  clipFlip: false,
 };
 
 let starGroup = null;
 let extGroup = null;
 let rimGroup = null;
 let labelGroup = null;
+
+// Debug face click-to-hide: which face indices are currently hidden,
+// surviving across rebuild() (which throws away and remakes every mesh on
+// almost every parameter change) by being re-applied at the end of it.
+const hiddenFaceIndices = new Set();
+function applyHiddenFaces() {
+  starGroup.children.forEach((m) => { m.visible = !hiddenFaceIndices.has(m.userData.faceIndex); });
+  rimGroup.children.forEach((m) => { m.visible = !hiddenFaceIndices.has(m.userData.faceIndex); });
+}
 
 function disposeGroup(group) {
   group.traverse((obj) => {
@@ -244,11 +290,15 @@ function rebuild() {
 
   for (const face of faces) {
     const { geometry, arms } = mapSolidStarToFace(star2D, face, params);
-    starGroup.add(new THREE.Mesh(geometry, sculptureMaterial));
+    const starMesh = new THREE.Mesh(geometry, sculptureMaterial);
+    starMesh.userData.faceIndex = face.index;
+    starGroup.add(starMesh);
 
     if (params.showRim) {
       const rimGeom = buildStarRim(star2D, face, params);
-      rimGroup.add(new THREE.Mesh(rimGeom, rimMaterial));
+      const rimMesh = new THREE.Mesh(rimGeom, rimMaterial);
+      rimMesh.userData.faceIndex = face.index;
+      rimGroup.add(rimMesh);
     }
 
     const faceLabel = makeLabel(`F${face.index}`, 'face-label');
@@ -283,6 +333,9 @@ function rebuild() {
         lengthFactor: params.extLengthFactor,
         twistDeg: params.extTwistDeg,
         depthFraction: params.extDepthFraction,
+        loopRadiusFactor: params.extLoopRadiusFactor,
+        loopSweepDeg: params.extLoopSweepDeg,
+        loopTFraction: params.extLoopTFraction,
       });
       extGroup.add(new THREE.Mesh(geometry, sculptureMaterial));
     }
@@ -295,6 +348,7 @@ function rebuild() {
   scene.add(extGroup);
   scene.add(rimGroup);
   scene.add(labelGroup);
+  applyHiddenFaces();
 
   document.getElementById('metrics').innerHTML =
     `Faces: ${faces.length} | Tips: ${tipsByLabel.size}/60<br>` +
@@ -338,6 +392,9 @@ bindSlider('tipBendPower', 'tipBendPower');
 bindSlider('extTwistDeg', 'extTwistDeg');
 bindSlider('extLengthFactor', 'extLengthFactor');
 bindSlider('extDepthFraction', 'extDepthFraction');
+bindSlider('extLoopRadiusFactor', 'extLoopRadiusFactor');
+bindSlider('extLoopSweepDeg', 'extLoopSweepDeg');
+bindSlider('extLoopTFraction', 'extLoopTFraction');
 bindSlider('rimWidthFrac', 'rimWidthFrac');
 bindSlider('rimProudFrac', 'rimProudFrac');
 bindSlider('holeSize', 'holeSize', { appearanceOnly: true });
@@ -372,10 +429,99 @@ document.getElementById('lampIntensity').addEventListener('input', (e) => {
   document.getElementById('v-lampIntensity').textContent = params.lampIntensity;
   if (params.lampMode) lampLight.intensity = params.lampIntensity;
 });
+document.getElementById('debugFacePick').addEventListener('change', (e) => {
+  params.debugFacePick = e.target.checked;
+});
+document.getElementById('clipEnabled').addEventListener('change', (e) => {
+  params.clipEnabled = e.target.checked;
+  applyClipping();
+});
+document.getElementById('clipAxis').addEventListener('change', (e) => {
+  params.clipAxis = e.target.value;
+  applyClipping();
+});
+document.getElementById('clipFlip').addEventListener('change', (e) => {
+  params.clipFlip = e.target.checked;
+  applyClipping();
+});
+document.getElementById('clipOffset').addEventListener('input', (e) => {
+  params.clipOffset = parseFloat(e.target.value);
+  document.getElementById('v-clipOffset').textContent = params.clipOffset;
+  applyClipping();
+});
+
+// Click-to-hide faces (debug): raycast against the star sheets, toggling
+// visibility of that face's star + rim mesh. Distinguishes a click from an
+// orbit-drag by pointer travel distance, since OrbitControls also listens
+// on the same canvas and a drag-to-rotate shouldn't also toggle a face.
+const raycaster = new THREE.Raycaster();
+const pointerNDC = new THREE.Vector2();
+let pointerDownAt = null;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  pointerDownAt = { x: e.clientX, y: e.clientY };
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  const start = pointerDownAt;
+  pointerDownAt = null;
+  if (!params.debugFacePick || !start) return;
+  if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 4) return; // drag/orbit, not a click
+  pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointerNDC, camera);
+  const hits = raycaster.intersectObjects(starGroup.children, false);
+  if (!hits.length) return;
+  const faceIndex = hits[0].object.userData.faceIndex;
+  if (faceIndex === undefined) return;
+  if (hiddenFaceIndices.has(faceIndex)) hiddenFaceIndices.delete(faceIndex);
+  else hiddenFaceIndices.add(faceIndex);
+  applyHiddenFaces();
+});
+
+// Settings-table export: a copy-pasteable markdown table of every current
+// parameter, so the user can hand tuned values straight back without
+// re-typing a screenshot's numbers by hand.
+document.getElementById('exportSettings').addEventListener('click', async () => {
+  const rows = Object.entries(params)
+    .map(([k, v]) => `| ${k} | ${v} |`)
+    .join('\n');
+  const table = `| Param | Value |\n| --- | --- |\n${rows}`;
+  const out = document.getElementById('settingsOutput');
+  out.value = table;
+  out.style.display = 'block';
+  out.focus();
+  out.select();
+  const status = document.getElementById('exportStatus');
+  try {
+    await navigator.clipboard.writeText(table);
+    status.textContent = 'Copied to clipboard!';
+  } catch {
+    status.textContent = 'Clipboard blocked - text is selected below, copy manually.';
+  }
+  setTimeout(() => { status.textContent = ''; }, 4000);
+});
+
+// Push every param's actual value into its DOM control (slider position/
+// label, checkbox checked state, select value) - the HTML's own hardcoded
+// `value`/`checked`/`selected` attributes are just a static starting point
+// for markup readability and easily drift out of sync with the real JS
+// defaults above (as happened here: the panel kept showing "Bronze" and
+// an unchecked lamp-mode box while matteClay + lamp mode were actually
+// being rendered). Called once for everything at load, and reused by
+// setParams() for whichever keys it's given.
+function syncControl(key) {
+  const el = document.getElementById(key);
+  const label = document.getElementById(`v-${key}`);
+  if (el && el.type === 'range') el.value = params[key];
+  if (el && el.type === 'checkbox') el.checked = params[key];
+  if (el && el.tagName === 'SELECT') el.value = params[key];
+  if (label) label.textContent = params[key];
+}
+for (const key of Object.keys(params)) syncControl(key);
 
 applyMaterialPreset(params.material);
 applyPattern();
 applyLampMode(params.lampMode);
+applyClipping();
 rebuild();
 
 window.__spiralDodeca = {
@@ -384,17 +530,11 @@ window.__spiralDodeca = {
   setExtensionsVisible(v) { extGroup.visible = v; },
   setParams(partial) {
     Object.assign(params, partial);
-    for (const key of Object.keys(partial)) {
-      const el = document.getElementById(key);
-      const label = document.getElementById(`v-${key}`);
-      if (el && el.type === 'range') el.value = partial[key];
-      if (el && el.type === 'checkbox') el.checked = partial[key];
-      if (el && el.tagName === 'SELECT') el.value = partial[key];
-      if (label) label.textContent = partial[key];
-    }
+    for (const key of Object.keys(partial)) syncControl(key);
     applyMaterialPreset(params.material);
     applyPattern();
     applyLampMode(params.lampMode);
+    applyClipping();
     if (params.showLabels !== undefined) setLabelsVisible(params.showLabels);
     rebuild();
   },

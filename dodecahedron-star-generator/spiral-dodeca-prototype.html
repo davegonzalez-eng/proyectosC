@@ -103,12 +103,33 @@
 
     <h2>Connections (arm extensions)</h2>
     <div class="row"><label><span>Show extensions</span><input id="showExtensions" type="checkbox" checked style="width:auto"></label></div>
-    <div class="row"><label><span>Extension twist (deg, CCW)</span><span id="v-extTwistDeg">-70</span></label><input id="extTwistDeg" type="range" min="-360" max="360" step="5" value="-70"></div>
+    <div class="row"><label><span>Extension twist (deg, CCW)</span><span id="v-extTwistDeg">-195</span></label><input id="extTwistDeg" type="range" min="-360" max="360" step="5" value="-195"></div>
     <div class="row"><label><span>Extension length factor</span><span id="v-extLengthFactor">0.38</span></label><input id="extLengthFactor" type="range" min="0.15" max="1" step="0.01" value="0.38"></div>
     <div class="row"><label><span>Extension depth fraction</span><span id="v-extDepthFraction">0.85</span></label><input id="extDepthFraction" type="range" min="0.75" max="1" step="0.01" value="0.85"></div>
+    <div class="row"><label><span>Loop radius (x tip half-width)</span><span id="v-extLoopRadiusFactor">3.5</span></label><input id="extLoopRadiusFactor" type="range" min="0.5" max="8" step="0.1" value="3.5"></div>
+    <div class="row"><label><span>Loop sweep (deg)</span><span id="v-extLoopSweepDeg">200</span></label><input id="extLoopSweepDeg" type="range" min="90" max="300" step="5" value="200"></div>
+    <div class="row"><label><span>Loop length share</span><span id="v-extLoopTFraction">0.3</span></label><input id="extLoopTFraction" type="range" min="0.1" max="0.5" step="0.01" value="0.3"></div>
+
+    <h2>Cross-section (pane)</h2>
+    <div class="row"><label><span>Enable clipping plane</span><input id="clipEnabled" type="checkbox" style="width:auto"></label></div>
+    <div class="row"><label><span>Axis</span></label>
+      <select id="clipAxis">
+        <option value="x">X</option>
+        <option value="y" selected>Y</option>
+        <option value="z">Z</option>
+      </select>
+    </div>
+    <div class="row"><label><span>Offset</span><span id="v-clipOffset">0</span></label><input id="clipOffset" type="range" min="-2.6" max="2.6" step="0.02" value="0"></div>
+    <div class="row"><label><span>Flip side</span><input id="clipFlip" type="checkbox" style="width:auto"></label></div>
 
     <h2>Debug</h2>
     <div class="row"><label><span>Show F#/A# labels</span><input id="showLabels" type="checkbox" style="width:auto"></label></div>
+    <div class="row"><label><span>Click a face to hide it</span><input id="debugFacePick" type="checkbox" style="width:auto"></label></div>
+
+    <h2>Export</h2>
+    <div class="row"><button id="exportSettings" style="width:100%; padding:6px; background:#2a2d38; color:#e8e8ec; border:1px solid rgba(255,255,255,0.15); border-radius:5px; cursor:pointer;">Copy settings table</button></div>
+    <div class="row" id="exportStatus" style="color:#7fd1ff;"></div>
+    <textarea id="settingsOutput" readonly rows="8" style="display:none; width:100%; font-size:10px; background:#0d0f14; color:#e8e8ec; border:1px solid rgba(255,255,255,0.15); border-radius:5px;"></textarea>
 
     <div id="metrics"></div>
     <details>
