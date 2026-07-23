@@ -1071,6 +1071,44 @@ with the stars hidden: 20 clean concave-sided triangles with sharp
 cusps, matching the reference figure; with stars visible they sit in the
 three-face gaps at rim scale.
 
+### 19b. Horn-arc width slider + clothoid (G2) fitting at the tips
+
+Two refinements to the horn triangles.
+
+**Independent bead width.** The arc width was hard-tied to the star
+rim's width (`x rim width` multiplier); now it's its own absolute
+control, `extArcWidthFrac` ("Arc bead width / R_out", default 0.04 -
+matching what the old default computed), so the triangles can be
+thickened or thinned without touching the stars' own rim.
+
+**Clothoid fitting.** Matching tangents alone (G1) still allows a
+curvature JUMP at the cusp: the arm's centerline arrives at its tip with
+real curvature (~1.12 in world units at current settings - tip dip, tip
+bend, and the spiral's own curl all contribute), while the old cubic
+Hermite launched with whatever curvature its tangent lengths implied. A
+true Euler spiral has no closed form between arbitrary 3D endpoint
+frames, so this implements what clothoid fitting is *for*: the
+centerline is now a QUINTIC Hermite (position + velocity + acceleration
+prescribed at both ends), with end accelerations set to
+`kappa * |v|^2 * N` from each arm's measured tip-curvature vector -
+`mapSolidStarToFace` now estimates it per tip from the circumcircle of
+the first three centerline samples in WORLD space, so it includes every
+distortion the surface pipeline applies. Curvature at each cusp then
+agrees exactly with the arm's (jump 1.12 -> 0 by construction; a
+finite-difference probe just off the seam confirms the trend, 0.66 ->
+0.43 at t=0.0015 before converging), and ramps continuously,
+clothoid-style, into the triangle side's own tight bend - which peaks
+mid-cusp at kappa ~68 with or without the fitting; that spike IS the
+horn shape, not a defect. `extClothoid` ("Clothoid curvature match",
+0-2, default 1) scales the matched curvature: 0 restores the flat
+launch, >1 overshoots for a more flourished horn.
+
+Checked standalone under Node: zero NaN across all 60 quintic arcs;
+curvature profiles sampled along a representative arc at cf=0 vs cf=1
+differ only near the seam (as intended) and are identical through the
+cusp's own bend. Checked in headless Chromium: triangles keep their
+sharp-cusped deltoid read with the fitting on.
+
 ## File layout
 
 ```

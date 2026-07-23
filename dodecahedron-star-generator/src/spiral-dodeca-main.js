@@ -207,7 +207,8 @@ const params = {
   showExtensions: true,
   extLengthFactor: 0.55,
   extDepthFraction: 0.95,
-  extArcWidthFactor: 1,
+  extArcWidthFrac: 0.04,
+  extClothoid: 1,
   // Rim bead tracing every boundary edge (outer silhouette + gaps),
   // like the earlier Quin study's RIM_W/RIM_PROUD.
   showRim: true,
@@ -326,10 +327,11 @@ function rebuild() {
       // material: the horn triangles read as the rim bead continuing off
       // the arm tips across the gaps, not as separate structural ribbon.
       const { geometry } = buildHornArc(tipA, tipB, {
-        arcWidth: R * params.rimWidthFrac * params.extArcWidthFactor * 2,
+        arcWidth: R * params.extArcWidthFrac,
         arcHeight: R * Math.max(params.rimProudFrac, 0.005) * 2,
         lengthFactor: params.extLengthFactor,
         depthFraction: params.extDepthFraction,
+        clothoidFactor: params.extClothoid,
       });
       extGroup.add(new THREE.Mesh(geometry, rimMaterial));
     }
@@ -385,7 +387,8 @@ bindSlider('tipBendTwistDeg', 'tipBendTwistDeg');
 bindSlider('tipBendPower', 'tipBendPower');
 bindSlider('extLengthFactor', 'extLengthFactor');
 bindSlider('extDepthFraction', 'extDepthFraction');
-bindSlider('extArcWidthFactor', 'extArcWidthFactor');
+bindSlider('extArcWidthFrac', 'extArcWidthFrac');
+bindSlider('extClothoid', 'extClothoid');
 bindSlider('rimWidthFrac', 'rimWidthFrac');
 bindSlider('rimProudFrac', 'rimProudFrac');
 bindSlider('holeSize', 'holeSize', { appearanceOnly: true });

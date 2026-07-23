@@ -397,7 +397,7 @@ export function buildSolidStar2D(params, R) {
     const halfW = cum.map((c) =>
       bandHW * THREE.MathUtils.lerp(tipWidthFrac, 1, Math.pow(c / total, widthTaperPower)));
     armsData.push({ pts, halfW });
-    tips2D.push({ tip: pts[0], prev: pts[1] });
+    tips2D.push({ tip: pts[0], prev: pts[1], prev2: pts[2] });
   }
 
   const armDist = (arm, px, py) => {
@@ -734,10 +734,29 @@ export function mapSolidStarToFace(star2D, face, params = {}) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
-  const arms = star2D.tips2D.map(({ tip, prev }, armIndex) => {
-    const tipPos = place(tip.x, tip.y);
-    const tangent = tipPos.clone().sub(place(prev.x, prev.y)).normalize();
-    return { armIndex, tipPosition: tipPos, tipTangent: tangent };
+  const arms = star2D.tips2D.map(({ tip, prev, prev2 }, armIndex) => {
+    const p0 = place(tip.x, tip.y);
+    const p1 = place(prev.x, prev.y);
+    const p2 = place(prev2.x, prev2.y);
+    const tangent = p0.clone().sub(p1).normalize();
+    // Discrete curvature at the tip - circumcircle of the first three
+    // centerline samples, with the curvature normal taken from the second
+    // difference (tangential component removed). Measured in WORLD space
+    // through place(), so it includes every distortion the surface pipeline
+    // applies (bulge, twist, tip dip, exponential tip bend) - this is what
+    // lets a connector continue not just the arm's direction but its
+    // curvature (see buildHornArc's clothoid fitting).
+    const la = p0.distanceTo(p1), lb = p1.distanceTo(p2), lc = p0.distanceTo(p2);
+    const areaVec = new THREE.Vector3().crossVectors(p1.clone().sub(p0), p2.clone().sub(p0));
+    const area = areaVec.length() / 2;
+    const tipCurvature = new THREE.Vector3();
+    if (area > 1e-12 && la * lb * lc > 1e-18) {
+      const kappa = (4 * area) / (la * lb * lc);
+      const second = p2.clone().addScaledVector(p1, -2).add(p0);
+      second.addScaledVector(tangent, -second.dot(tangent));
+      if (second.lengthSq() > 1e-18) tipCurvature.copy(second.normalize().multiplyScalar(kappa));
+    }
+    return { armIndex, tipPosition: p0, tipTangent: tangent, tipCurvature };
   });
 
   return { geometry, arms };
@@ -914,6 +933,21 @@ export function buildStarRim(star2D, face, params = {}) {
  * so the triangles read as the rim pattern continuing across the gaps
  * rather than as structural ribbon. A mild radial squash (`depthFraction`)
  * keeps the mid-span from ballooning off the sphere.
+ *
+ * CLOTHOID FITTING (`clothoidFactor`): matching tangents alone (G1) still
+ * allows a curvature JUMP at the cusp - the arm's centerline arrives with
+ * real curvature (tip dip + tip bend + the spiral's own curl) and a plain
+ * cubic Hermite launches with whatever curvature its tangent lengths
+ * happen to imply, which reads as a subtle crease in the highlight. A true
+ * Euler spiral has no closed form between arbitrary 3D endpoint frames, so
+ * this does what clothoid fitting is FOR instead: the centerline is a
+ * QUINTIC Hermite whose end accelerations are set to `kappa * |v|^2 * N`
+ * using each arm's measured tip curvature vector (`tipCurvature` from
+ * mapSolidStarToFace) - exact curvature agreement at both cusps (G2), with
+ * the quintic ramping curvature smoothly (near-linearly, clothoid-style)
+ * in between. `clothoidFactor` scales the matched curvature: 0 falls back
+ * to the flat-launch behavior, 1 = exact match, >1 overshoots for a more
+ * flourished horn.
  */
 export function buildHornArc(tipA, tipB, options = {}) {
   const {
@@ -921,6 +955,7 @@ export function buildHornArc(tipA, tipB, options = {}) {
     arcHeight = 0.04,   // full radial height of the bead
     lengthFactor = 0.55,
     depthFraction = 0.95,
+    clothoidFactor = 1,
     segments = 48,
     radialSegments = 10,
   } = options;
@@ -928,16 +963,28 @@ export function buildHornArc(tipA, tipB, options = {}) {
   const P0 = tipA.tipPosition.clone();
   const P1 = tipB.tipPosition.clone();
   const span = P0.distanceTo(P1);
-  const m0 = tipA.tipTangent.clone().multiplyScalar(span * lengthFactor);
-  const m1 = tipB.tipTangent.clone().multiplyScalar(-span * lengthFactor);
+  const L = span * lengthFactor;
+  const m0 = tipA.tipTangent.clone().multiplyScalar(L);
+  const m1 = tipB.tipTangent.clone().multiplyScalar(-L);
+  // End accelerations: pure normal component kappa*|v|^2*N reproduces the
+  // arm's curvature exactly at the endpoint (speed there is |m| = L).
+  // Curvature vectors are direction-invariant, so the arrival end needs no
+  // sign flip even though the curve traverses against B's tangent.
+  const zero = new THREE.Vector3();
+  const A0 = (tipA.tipCurvature || zero).clone().multiplyScalar(clothoidFactor * L * L);
+  const A1 = (tipB.tipCurvature || zero).clone().multiplyScalar(clothoidFactor * L * L);
 
+  // Quintic Hermite: position + velocity + acceleration prescribed at both
+  // ends (h00/h10/h20 at t=0, h01/h11/h21 at t=1).
   const hermite = (t) => {
-    const t2 = t * t, t3 = t2 * t;
+    const t2 = t * t, t3 = t2 * t, t4 = t3 * t, t5 = t4 * t;
     return new THREE.Vector3()
-      .addScaledVector(P0, 2 * t3 - 3 * t2 + 1)
-      .addScaledVector(m0, t3 - 2 * t2 + t)
-      .addScaledVector(P1, -2 * t3 + 3 * t2)
-      .addScaledVector(m1, t3 - t2);
+      .addScaledVector(P0, 1 - 10 * t3 + 15 * t4 - 6 * t5)
+      .addScaledVector(m0, t - 6 * t3 + 8 * t4 - 3 * t5)
+      .addScaledVector(A0, (t2 - 3 * t3 + 3 * t4 - t5) / 2)
+      .addScaledVector(P1, 10 * t3 - 15 * t4 + 6 * t5)
+      .addScaledVector(m1, -4 * t3 + 7 * t4 - 3 * t5)
+      .addScaledVector(A1, (t3 - 2 * t4 + t5) / 2);
   };
   // Blend toward `depthFraction` of the endpoints' radius mid-span (sin
   // profile, zero at both ends so the cusps stay exactly ON the tips).
