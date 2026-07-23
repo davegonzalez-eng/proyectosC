@@ -1209,6 +1209,63 @@ flies a continuous, closed loop through several faces with no visible pops
 or direction reversals; toggling it off restores the default framing; the
 panel starts collapsed and expands correctly via the chevron.
 
+## 21. Flyover speed/rewind control; external-hover flight path
+
+Two follow-up refinements to the flyover.
+
+**Speed control, with rewind.** A "Flyover speed" slider (-2 to 2, default
+0.33 - "1/3 of the current speed," per the brief) scales playback rate;
+negative values rewind, 0 pauses. This required a real rework of the
+camera-update timing, not just a multiplier: the previous version derived
+`t` directly from `(now - startTime) / duration`, which only works for a
+constant forward rate fixed at activation. Replaced with running state -
+`flyoverT` (position in the loop) and `flyoverLastMs` (last update
+timestamp) - incremented every frame by `(dt / duration) * speed`, wrapped
+correctly into `[0, 1)` even for negative increments (`((t % 1) + 1) % 1`).
+This lets speed change - including flipping sign - at any instant with no
+discontinuity. The look-ahead sample direction also flips with the sign of
+speed (`dir = speed < 0 ? -1 : 1`), so the camera keeps facing the way it's
+actually travelling when rewinding rather than staring backwards. Verified
+the wrap arithmetic standalone under Node for both a same-sign step and a
+step that crosses the 0/1 seam while rewinding.
+
+**External-hover flight path.** The previous path pulled every arm sample
+inward (`inset`) to fly "inside the shell." Changed to a small OUTWARD
+push instead (`mapArmCenterline(..., -hoverFrac)` - the same inset
+parameter, just negative, since it's a signed offset along the local
+outward normal) so the camera hugs just outside the arm's external surface
+- reading as a low flyover over terrain rather than a trip through the
+understructure. A constant gentle downward gaze bias (`FLYOVER_DOWNWARD_TILT_FRAC`,
+applied every frame by pulling the look-at target slightly toward the
+sphere's center) reinforces that "looking down at the terrain" attitude.
+
+The horn-arc segments are left as the one deliberate exception - their own
+`depthFraction` mid-span squash already dips them under the neighboring
+star, which *is* "the small space where it goes underneath the adjacent
+star." Across just those stretches, two things are baked in, both windowed
+smoothly with a `sin(pi*s)` profile (zero at both cusps, peak mid-arc, so
+neither pops in or out abruptly): the camera's own position gets nudged a
+little to the right (relative to travel direction, via `right =
+cross(tangent, outward)`), and a parallel `lookOffsets` array (same length
+as the position array, zero everywhere except these stretches) biases the
+gaze a little to the *left* - shifting one way while glancing the other,
+so passing under the neighbor reads as a deliberate lean-and-look rather
+than a straight dive. Looked up at playback time via
+`curve.getUtoTmapping(t)` (mapping the arc-length parameter back to the
+underlying raw parameter) so the offset lookup stays aligned with the
+position sample regardless of the curve's uneven point spacing.
+
+Checked standalone under Node: zero NaN across all ~1200 points and
+look-offsets; every sampled point on a representative arm's hover
+centerline landed strictly outside (farther from the sphere's center than)
+the same arm's un-inset centerline, confirming the external-hover direction;
+exactly 230 of 1233 look-offsets are nonzero, matching
+`numHops * (arcSamples - 1)` exactly (the two endpoints of each arc window
+are zero by construction). Checked in headless Chromium at an accelerated
+test speed: the tour now reads as flying low over the visible arm surface
+with the horn triangles passing underneath, rather than threading through
+the interior.
+
 ## File layout
 
 ```
