@@ -693,6 +693,39 @@ angle metrics from §13 at the whole-sculpture scale, re-adding the
 terminal eye-hole, and only then considering folding this into
 `main.js`/`index.html` in place of the current 5-thin-arm system.
 
+### 14b. Connections land in the neighbor's "armpit," not on its arm tip
+
+User feedback with a reference photo: a connection landing directly ON
+the neighboring face's arm tip reads as the ribbon just butting into that
+arm. In the reference, the connecting swirl instead threads through the
+*gap* between two of the neighbor's arms (the "armpit") and disappears
+underneath the neighbor's wider body - the destination *arm* (picked by
+`computeAdjacentFaceConnections()`'s "skip one arm" rule) was already
+correct, only the exact landing *point* near it was wrong.
+
+Added `armpitPoint(face, armIndex, neighborOffset, radiusFrac)` to
+`spiral-dodeca-main.js`: a point at the angular midpoint between
+`armIndex` and its neighbor (`armIndex + neighborOffset`, `radiusFrac *
+R_out` out from center) - built with the exact same
+`applySurfaceTwist`/`applyTipDip` pipeline the arms themselves use, so it
+sits on the same surface language, just at an angle no arm actually
+sweeps through. The connection loop now builds each ribbon's landing
+endpoint from this armpit point instead of the destination arm's real
+tip (the *source* side, `tipA`, is untouched - still a real tip; only
+the landing side changes). `ribbon.js` itself needed no changes: the
+existing inward mid-dip (`depthFraction`) does the "passes underneath"
+work on its own once the endpoint itself isn't sitting on a visible arm.
+
+Checked standalone under Node: zero NaN/Infinity across all 60 ribbons
+built against armpit landing points, all 60 tip/armpit lookups resolve.
+Checked in headless Chromium: zero console errors; the render reads
+noticeably more organic than the tip-to-tip version - ribbons visibly
+thread through gaps between arms rather than terminating flush against
+another arm's point, with plenty of individual arm tips now left
+exposed as small free spikes (each arm has exactly one real ribbon
+touching its own tip - the one where it's the *source* - since incoming
+connections now land in a neighboring gap instead).
+
 ## File layout
 
 ```

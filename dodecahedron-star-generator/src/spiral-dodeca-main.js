@@ -25,7 +25,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
-import { buildDodecahedron, computeAdjacentFaceConnections } from './geometry.js';
+import { buildDodecahedron, computeAdjacentFaceConnections, applySurfaceTwist, applyTipDip } from './geometry.js';
 import { buildSpiralStar } from './spiralarm.js';
 import { buildRibbon } from './ribbon.js';
 
@@ -92,7 +92,40 @@ const params = {
   ribbonTwistTurns: 0.4,
   ribbonDepthFraction: 0.94,
   ribbonLeaveFraction: 0.06,
+  armpitRadiusFrac: 0.45,
+  armpitNeighborOffset: 1,
 };
+
+/**
+ * A point in the gap ("armpit") between arm `armIndex` and its neighbor
+ * (`armIndex + neighborOffset`) on `face`, at radius `radiusFrac * R_out` -
+ * NOT on any arm's surface. Built with the exact same bulge/twist/tip-dip
+ * pipeline `buildSpiralStar`'s arms use (via the same `applySurfaceTwist`/
+ * `applyTipDip` from geometry.js), so it sits on the same surface language,
+ * just at an angle no arm actually sweeps through.
+ *
+ * Per user reference photos: a connection shouldn't land ON the
+ * neighboring face's arm tip (that reads as the ribbon just butting into
+ * the arm) - it should aim for this gap instead, then dip under the
+ * neighboring star's body, the way the ribbon's own inward mid-dip
+ * (`depthFraction` in ribbon.js) already pulls its middle inward relative
+ * to its endpoints.
+ */
+function armpitPoint(face, armIndex, neighborOffset, radiusFrac) {
+  const R = face.R_out;
+  const armAngle = (armIndex * Math.PI * 2) / 5;
+  const angle = armAngle + (neighborOffset * Math.PI * 2) / 5 / 2;
+  const r = R * radiusFrac;
+  const u = r * Math.cos(angle);
+  const w = r * Math.sin(angle);
+  const bulge = params.bulgeStrength ? params.bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
+  const surfTwistRad = THREE.MathUtils.degToRad(params.surfTwistDeg);
+  const world = face.center.clone().add(applySurfaceTwist(face, u, w, bulge, surfTwistRad));
+  applyTipDip(world, r, face, params.tipDipStrength);
+  return world;
+}
+
+const LABEL_RE = /^F(\d+)-A(\d+)$/;
 
 let starGroup = null;
 let ribbonGroup = null;
@@ -142,11 +175,17 @@ function rebuild() {
   let missing = 0;
   for (const { a, b } of connections) {
     const tipA = tipsByLabel.get(a);
-    const tipB = tipsByLabel.get(b);
-    if (!tipA || !tipB) {
+    const bMatch = b.match(LABEL_RE);
+    if (!tipA || !bMatch) {
       missing++;
       continue;
     }
+    const faceB = faces[parseInt(bMatch[1], 10)];
+    const armIndexB = parseInt(bMatch[2], 10);
+    const landing = armpitPoint(faceB, armIndexB, params.armpitNeighborOffset, params.armpitRadiusFrac);
+    const landingOutDir = landing.clone().sub(faceB.center).normalize();
+    const tipB = { position: landing, outDir: landingOutDir, tangent: landingOutDir, label: b };
+
     const { geometry } = buildRibbon(tipA, tipB, {
       tubeRadius: tipHalfWidth,
       halfWidth: tipHalfWidth * params.ribbonWidthFactor,
@@ -200,6 +239,8 @@ bindSlider('ribbonWidthFactor', 'ribbonWidthFactor');
 bindSlider('ribbonTwistTurns', 'ribbonTwistTurns');
 bindSlider('ribbonDepthFraction', 'ribbonDepthFraction');
 bindSlider('ribbonLeaveFraction', 'ribbonLeaveFraction');
+bindSlider('armpitRadiusFrac', 'armpitRadiusFrac');
+bindSlider('armpitNeighborOffset', 'armpitNeighborOffset');
 
 rebuild();
 
