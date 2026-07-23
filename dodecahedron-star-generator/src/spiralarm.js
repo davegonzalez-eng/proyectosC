@@ -610,6 +610,45 @@ export function buildSolidStar2D(params, R) {
 }
 
 /**
+ * Extra, steep (exponential) rotation applied to a point's (u, w) BEFORE
+ * the rest of the surface pipeline, growing sharply only in the last
+ * stretch before an arm's tip (`tipScale * R`) - `tipBendPower` high (5-8)
+ * keeps it near zero until r/r0 is close to 1, then ramps up fast. This is
+ * the "twist" half of the tip bend: without it, an arm's plane meets its
+ * extension at close to a right angle, because nothing about the star
+ * surface itself leans toward the extension's incoming direction until
+ * the very last moment.
+ */
+function tipBendRotate(u, w, r, R, params) {
+  const { tipScale = 1, tipBendPower = 5, tipBendTwistDeg = 0 } = params;
+  if (!tipBendTwistDeg || r < 1e-9) return { u, w };
+  const r0 = R * tipScale;
+  const tNear = Math.min(Math.max(r / r0, 0), 1);
+  const bend = Math.pow(tNear, tipBendPower);
+  const extra = THREE.MathUtils.degToRad(tipBendTwistDeg) * bend;
+  const c = Math.cos(extra), s = Math.sin(extra);
+  return { u: u * c - w * s, w: u * s + w * c };
+}
+
+/**
+ * The "dip" half of the tip bend: an extra inward pull (toward the sphere
+ * center), same steep exponential onset as `tipBendRotate`, layered ON TOP
+ * of the existing (much gentler, power-1.6) `applyTipDip`. Together the
+ * two make the star surface curve away from the tangent plane increasingly
+ * sharply in just the last stretch before the tip, so its local slope
+ * already roughly matches the extension's incoming slope by the time they
+ * meet - the "as the arm approaches the tip it bends down with higher and
+ * higher angles" the user asked for.
+ */
+function tipBendDip(r, R, params) {
+  const { tipScale = 1, tipBendStrength = 0, tipBendPower = 5 } = params;
+  if (!tipBendStrength) return 0;
+  const r0 = R * tipScale;
+  const tNear = Math.min(Math.max(r / r0, 0), 1);
+  return tipBendStrength * R * Math.pow(tNear, tipBendPower);
+}
+
+/**
  * Map a `buildSolidStar2D` result onto one face: top/bottom sheets offset
  * along the local surface normal, side walls around every boundary loop,
  * UV = (u, w) world coordinates. Also returns each arm's world tip
@@ -629,9 +668,12 @@ export function mapSolidStarToFace(star2D, face, params = {}) {
 
   const place = (u, w) => {
     const r = Math.hypot(u, w);
+    const rot = tipBendRotate(u, w, r, R, params);
     const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
-    const world = face.center.clone().add(applySurfaceTwist(face, u, w, bulge, surfTwistRad));
+    const world = face.center.clone().add(applySurfaceTwist(face, rot.u, rot.w, bulge, surfTwistRad));
     applyTipDip(world, r, face, tipDipStrength);
+    const dip = tipBendDip(r, R, params);
+    if (dip) world.addScaledVector(world.clone().normalize(), -dip);
     return world;
   };
 
@@ -743,9 +785,12 @@ export function buildStarRim(star2D, face, params = {}) {
 
   const place = (u, w) => {
     const r = Math.hypot(u, w);
+    const rot = tipBendRotate(u, w, r, R, params);
     const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
-    const world = face.center.clone().add(applySurfaceTwist(face, u, w, bulge, surfTwistRad));
+    const world = face.center.clone().add(applySurfaceTwist(face, rot.u, rot.w, bulge, surfTwistRad));
     applyTipDip(world, r, face, tipDipStrength);
+    const dip = tipBendDip(r, R, params);
+    if (dip) world.addScaledVector(world.clone().normalize(), -dip);
     return world;
   };
 
@@ -810,24 +855,36 @@ export function buildStarRim(star2D, face, params = {}) {
   };
 
   const positions = [];
+  const uvs = [];
   const indices = [];
-  const pushVert = (p) => positions.push(p.x, p.y, p.z);
+  // UV = the actual (u, w) world-unit coordinate each rim vertex sits at
+  // (not the cross-section's own s/height), matching mapSolidStarToFace's
+  // convention exactly so the shared material's tiling perforation pattern
+  // continues seamlessly from the sheet onto the rim. Without this the
+  // geometry has no UV attribute at all - the alphaMap then samples
+  // undefined/(0,0) for every fragment, which alphaTest discards as a
+  // "hole" everywhere, making the whole rim invisible regardless of any
+  // pattern/hole-size setting (the bug behind "rim doesn't show up").
+  const pushVert = (p, u, w) => { positions.push(p.x, p.y, p.z); uvs.push(u, w); };
 
   for (const [a, b] of star2D.boundaryNext) {
     const csA = crossSection(a);
     const csB = crossSection(b);
+    const ua = pos2[a * 2], wa = pos2[a * 2 + 1];
+    const ub = pos2[b * 2], wb = pos2[b * 2 + 1];
     for (let k = 0; k < rimCrossSamples; k++) {
       const base = positions.length / 3;
-      pushVert(csA[k]);
-      pushVert(csA[k + 1]);
-      pushVert(csB[k]);
-      pushVert(csB[k + 1]);
+      pushVert(csA[k], ua, wa);
+      pushVert(csA[k + 1], ua, wa);
+      pushVert(csB[k], ub, wb);
+      pushVert(csB[k + 1], ub, wb);
       indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
     }
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;

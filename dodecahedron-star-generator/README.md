@@ -884,6 +884,73 @@ reads as one continuous surface rather than a kink; the star's dome
 faces read smooth rather than faceted; the rim gives every edge -
 outline and internal gaps alike - a defined, crafted border.
 
+## 17. Rim visibility bug, exponential tip-bend, lamp mode, expanded materials
+
+Four fixes requested from a screenshot of the tuned panel plus a lit-lamp
+reference photo.
+
+**Rim was invisible no matter what.** `buildStarRim()`'s geometry never got
+a `uv` `BufferAttribute` at all. It shares `sculptureMaterial`, which carries
+`alphaMap` + `alphaTest=0.45` for the perforation pattern; with no UV data
+every fragment samples the alpha texture at (0,0), which the hex/coral
+texture renders as a hole (alpha below the test threshold) - so the *entire*
+rim was being alpha-discarded regardless of the "Show rim" checkbox or any
+slider, exactly matching the report. Fixed by tracking `(u,w)` per rim
+vertex with the same raw world-unit convention `mapSolidStarToFace` already
+uses, and setting a real `uv` attribute on the rim geometry.
+
+Once visible, the rim read as a "broken chain of tiles" rather than a solid
+lip - the hex/coral holes were sized for the wide star arms and were
+punching clean through the much narrower rim strip. Fixed by giving the rim
+its own `rimMaterial` (same color/metalness/roughness, kept in sync by
+`applyMaterialPreset`) with **no** alphaMap/alphaTest - the rim is always
+solid, never perforated.
+
+**Exponential tip-bend.** The arm/extension seam still met at a steep angle
+even after §16's eased twist, because nothing pushed the *star sheet itself*
+to lean toward the incoming extension before the seam - the eased twist only
+smoothed the extension's own profile. Added `tipBendRotate`/`tipBendDip` in
+`spiralarm.js`: both take `r` (distance from hub) and `R*tipScale` (tip
+radius) and raise `t = r/R` to a configurable power (`tipBendPower`, default
+5) so the effect is ~0 across most of the arm and switches on sharply only
+in the last stretch before the tip - an extra inward dip
+(`tipBendStrength`) and an extra CCW rotation (`tipBendTwistDeg`) layered on
+top of the existing `applyTipDip`/`applySurfaceTwist`. Wired into both
+`mapSolidStarToFace`'s and `buildStarRim`'s `place()` so the rim stays flush
+with the bent sheet. Checked standalone under Node with a proxy metric (angle
+between an arm's tip tangent and the straight-line direction to its
+Hermite-curve extension target): drops from ~80° with no tip-bend to ~43°
+at `tipBendStrength=0.12, tipBendTwistDeg=30, tipBendPower=5` - a real
+improvement, though the seam is not fully tangent-matched at these settings;
+further tuning of the three tip-bend sliders is a reasonable next step if
+the visual result still isn't smooth enough.
+
+**Lamp mode.** Added an internal warm `PointLight` at the sphere center plus
+an emissive "bulb" core sphere (hidden unless lamp mode is on); toggling it
+also dims the external key light and ambient light and darkens the scene
+background, so the alpha-tested perforation holes read as light escaping
+the shell - the reference photo's effect. `lampIntensity` is live-editable
+while lamp mode is on.
+
+**Expanded material palette.** Added `silver`, `brass`, `steel`, `aluminum`,
+and `matteClay` presets alongside the existing ones, matching the full
+palette from the earlier `quin_swirling_hex_web.html` shader study (now 12
+presets total: golden, silver, copper, bronze, brass, steel, chrome,
+aluminum, titanium, gunmetal, matteWhite, matteClay).
+
+**`setParams()` debug-hook bug.** Found while testing lamp mode via
+`window.__spiralDodeca.setParams({lampMode: true, ...})`: the hook never
+called `applyLampMode` and had no branch for checkbox inputs at all (only
+`range` and `select`), so lamp-mode tests silently no-opped. Fixed by adding
+a checkbox branch and calling `applyLampMode(params.lampMode)` /
+`setLabelsVisible(params.showLabels)` at the end of `setParams`.
+
+Checked in headless Chromium: default bronze render shows a continuous,
+solid rim along every outline and internal gap; switching to
+`{lampMode: true, material: 'matteWhite'}` shows the shell in matte white
+with a visibly darkened background and warm light shining through the
+perforation holes, matching the reference photo's intent.
+
 ## File layout
 
 ```

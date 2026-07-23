@@ -57,31 +57,68 @@ controls.enableDamping = true;
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.6);
 keyLight.position.set(5, 6, 7);
 scene.add(keyLight);
-scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+scene.add(ambientLight);
 
-// Material presets - same family as the main sculpture's, plus the warm
-// "golden" default the earlier hex-web study used.
+// Lamp mode: a warm point light + glowing "bulb" core at the sphere's
+// center, and the perforation pattern's alpha-tested holes let it shine
+// through - the same idea as the current main sculpture's lamp mode, and
+// the reference photo of an actual lit 3D-printed piece like this one.
+const lampLight = new THREE.PointLight(0xffb066, 0, 4.5);
+lampLight.position.set(0, 0, 0);
+scene.add(lampLight);
+const lampCore = new THREE.Mesh(
+  new THREE.SphereGeometry(0.16, 24, 24),
+  new THREE.MeshStandardMaterial({ color: 0xfff3d8, emissive: 0xffc07a, emissiveIntensity: 2.5, roughness: 1 })
+);
+lampCore.visible = false;
+scene.add(lampCore);
+
+function applyLampMode(on) {
+  lampLight.intensity = on ? params.lampIntensity : 0;
+  lampCore.visible = on;
+  // Dim the external "room" light so the internal glow reads clearly
+  // through the perforations instead of being washed out.
+  keyLight.intensity = on ? 0.5 : 1.6;
+  ambientLight.intensity = on ? 0.08 : 0.3;
+  scene.background.setHex(on ? 0x05060a : 0x14161c);
+}
+
+// Material presets - the full set from the earlier Quin raymarched study,
+// translated to metalness/roughness for MeshStandardMaterial.
 const MATERIAL_PRESETS = {
   golden: { color: 0xffa640, metalness: 0.9, roughness: 0.28, envMapIntensity: 1 },
-  matteWhite: { color: 0xf4f1ea, metalness: 0.0, roughness: 0.95, envMapIntensity: 0.25 },
-  bronze: { color: 0xd7b978, metalness: 0.75, roughness: 0.32, envMapIntensity: 1 },
+  silver: { color: 0xd9dee8, metalness: 0.95, roughness: 0.15, envMapIntensity: 1 },
   copper: { color: 0xf27a4d, metalness: 0.85, roughness: 0.3, envMapIntensity: 1 },
-  titanium: { color: 0x9aa0a6, metalness: 0.9, roughness: 0.45, envMapIntensity: 1 },
+  bronze: { color: 0xd7b978, metalness: 0.75, roughness: 0.32, envMapIntensity: 1 },
+  brass: { color: 0xe6d24d, metalness: 0.85, roughness: 0.25, envMapIntensity: 1 },
+  steel: { color: 0x999da6, metalness: 0.85, roughness: 0.35, envMapIntensity: 1 },
   chrome: { color: 0xe8e9eb, metalness: 1.0, roughness: 0.08, envMapIntensity: 1 },
+  aluminum: { color: 0xbfbfbf, metalness: 0.7, roughness: 0.4, envMapIntensity: 1 },
+  titanium: { color: 0x9aa0a6, metalness: 0.9, roughness: 0.45, envMapIntensity: 1 },
   gunmetal: { color: 0x59616e, metalness: 0.9, roughness: 0.4, envMapIntensity: 1 },
+  matteWhite: { color: 0xf4f1ea, metalness: 0.0, roughness: 0.95, envMapIntensity: 0.25 },
+  matteClay: { color: 0xd1bf9e, metalness: 0.0, roughness: 0.98, envMapIntensity: 0.15 },
 };
 
 // One shared material for stars AND extensions so the perforation pattern
-// reads as a single continuous surface across the joins.
+// reads as a single continuous surface across the joins. The rim gets its
+// OWN material with the same color/finish but never perforated - a thin
+// rim strip run through the same hex/coral alpha cutout reads as a broken
+// chain of little tiles rather than the reference's clean solid border,
+// since the holes are wide relative to the rim's own width.
 const sculptureMaterial = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
+const rimMaterial = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
 
 function applyMaterialPreset(name) {
   const p = MATERIAL_PRESETS[name] || MATERIAL_PRESETS.golden;
-  sculptureMaterial.color.setHex(p.color);
-  sculptureMaterial.metalness = p.metalness;
-  sculptureMaterial.roughness = p.roughness;
-  sculptureMaterial.envMapIntensity = p.envMapIntensity;
-  sculptureMaterial.needsUpdate = true;
+  for (const mat of [sculptureMaterial, rimMaterial]) {
+    mat.color.setHex(p.color);
+    mat.metalness = p.metalness;
+    mat.roughness = p.roughness;
+    mat.envMapIntensity = p.envMapIntensity;
+    mat.needsUpdate = true;
+  }
 }
 
 function applyPattern() {
@@ -115,35 +152,47 @@ const connections = computeAdjacentFaceConnections(faces);
 
 const params = {
   // Star shape - user's preferred settings from the live panel.
-  starRotationDeg: 24,
-  tipScale: 1.28,
+  starRotationDeg: 33,
+  tipScale: 1.35,
   turns: 0.1,
-  hubRadiusFrac: 0.02,
+  hubRadiusFrac: 0.18,
   bandHalfWidth: 0.24,
   tipWidthFrac: 0.44,
-  widthTaperPower: 0.8,
+  widthTaperPower: 0.9,
   thickness: 0.015,
   tipThicknessFrac: 0.17,
-  bulgeStrength: 0.23,
-  tipDipStrength: 0.32,
-  surfTwistDeg: -45,
+  bulgeStrength: 0.14,
+  tipDipStrength: 0.47,
+  surfTwistDeg: -53,
   filletFrac: 0.06,
   subdivisions: 3,
-  // Connections: arm extensions.
+  // Exponential tip bend: an extra dip + twist concentrated in just the
+  // last stretch before an arm's tip, so its plane already roughly
+  // matches the extension's incoming plane instead of meeting it near
+  // perpendicular.
+  tipBendStrength: 0.12,
+  tipBendTwistDeg: 30,
+  tipBendPower: 5,
+  // Connections: arm extensions. (Screenshot had this unchecked, but that
+  // reads as a temporary debugging state while isolating the star shape -
+  // defaulting back on since it's the actual point of the connections and
+  // the tip-bend fix below needs it visible to judge.)
   showExtensions: true,
-  extTwistDeg: -210,
+  extTwistDeg: -70,
   extLengthFactor: 0.38,
   extDepthFraction: 0.85,
   // Rim bead tracing every boundary edge (outer silhouette + gaps),
   // like the earlier Quin study's RIM_W/RIM_PROUD.
   showRim: true,
-  rimWidthFrac: 0.02,
-  rimProudFrac: 0.025,
+  rimWidthFrac: 0.05,
+  rimProudFrac: 0.035,
   // Appearance.
-  material: 'golden',
+  material: 'bronze',
   pattern: 'hex',
-  holeSize: 0.21,
+  holeSize: 0.24,
   patternScale: 3.2,
+  lampMode: false,
+  lampIntensity: 25,
   showLabels: false,
 };
 
@@ -199,7 +248,7 @@ function rebuild() {
 
     if (params.showRim) {
       const rimGeom = buildStarRim(star2D, face, params);
-      rimGroup.add(new THREE.Mesh(rimGeom, sculptureMaterial));
+      rimGroup.add(new THREE.Mesh(rimGeom, rimMaterial));
     }
 
     const faceLabel = makeLabel(`F${face.index}`, 'face-label');
@@ -283,6 +332,9 @@ bindSlider('tipDipStrength', 'tipDipStrength');
 bindSlider('surfTwistDeg', 'surfTwistDeg');
 bindSlider('filletFrac', 'filletFrac');
 bindSlider('subdivisions', 'subdivisions');
+bindSlider('tipBendStrength', 'tipBendStrength');
+bindSlider('tipBendTwistDeg', 'tipBendTwistDeg');
+bindSlider('tipBendPower', 'tipBendPower');
 bindSlider('extTwistDeg', 'extTwistDeg');
 bindSlider('extLengthFactor', 'extLengthFactor');
 bindSlider('extDepthFraction', 'extDepthFraction');
@@ -311,9 +363,19 @@ document.getElementById('showLabels').addEventListener('change', (e) => {
   params.showLabels = e.target.checked;
   setLabelsVisible(params.showLabels);
 });
+document.getElementById('lampMode').addEventListener('change', (e) => {
+  params.lampMode = e.target.checked;
+  applyLampMode(params.lampMode);
+});
+document.getElementById('lampIntensity').addEventListener('input', (e) => {
+  params.lampIntensity = parseFloat(e.target.value);
+  document.getElementById('v-lampIntensity').textContent = params.lampIntensity;
+  if (params.lampMode) lampLight.intensity = params.lampIntensity;
+});
 
 applyMaterialPreset(params.material);
 applyPattern();
+applyLampMode(params.lampMode);
 rebuild();
 
 window.__spiralDodeca = {
@@ -326,11 +388,14 @@ window.__spiralDodeca = {
       const el = document.getElementById(key);
       const label = document.getElementById(`v-${key}`);
       if (el && el.type === 'range') el.value = partial[key];
+      if (el && el.type === 'checkbox') el.checked = partial[key];
       if (el && el.tagName === 'SELECT') el.value = partial[key];
       if (label) label.textContent = partial[key];
     }
     applyMaterialPreset(params.material);
     applyPattern();
+    applyLampMode(params.lampMode);
+    if (params.showLabels !== undefined) setLabelsVisible(params.showLabels);
     rebuild();
   },
 };
