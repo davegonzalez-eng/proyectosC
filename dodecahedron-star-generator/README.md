@@ -614,6 +614,20 @@ continuously into a solid, visibly gap-free hub at the center; angled view
 confirms the fix holds up with real slab thickness and the 90° surface
 twist's 3D curl.
 
+### 13d. Rotation direction and a wider band-width range
+
+User feedback: with `turns=0.1` (a very gentle 36° base sweep), the arms'
+perceived "spin direction" in the render was dominated by the surface
+twist's out-of-plane lean (`applySurfaceTwist`, `surfTwistDeg=90`), not by
+the underlying spiral parametrization - flipping just the spiral's own
+`theta` direction (`angle = angleOffset - theta` instead of `+ theta`) had
+almost no visible effect, confirmed by comparing renders side by side.
+`applySurfaceTwist` is shared, verified, established code (used by the
+current 5-thin-arm star too), so rather than touch its convention, this
+motif's own `surfTwistDeg` default flips to `-90` (slider range widened to
+`-90..90`) to read as counter-clockwise. `bandHalfWidth`'s slider range
+also widened (`0.02..0.25` -> `0.02..0.4`) per request.
+
 ## File layout
 
 ```

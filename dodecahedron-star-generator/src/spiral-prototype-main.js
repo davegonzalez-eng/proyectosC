@@ -66,17 +66,17 @@ let bandMesh = null;
 
 const params = {
   armCount: 5,
-  turns: 0.15,
+  turns: 0.1,
   holeLoopTurns: 0,
-  hubRadiusFrac: 0.04,
-  bandHalfWidth: 0.145,
-  tipWidthFrac: 0.08,
-  widthTaperPower: 1.2,
-  thickness: 0.055,
-  tipThicknessFrac: 0.5,
-  bulgeStrength: 0.15,
+  hubRadiusFrac: 0.02,
+  bandHalfWidth: 0.25,
+  tipWidthFrac: 0.22,
+  widthTaperPower: 0.8,
+  thickness: 0.015,
+  tipThicknessFrac: 0.43,
+  bulgeStrength: 0.19,
   tipDipStrength: 0,
-  surfTwistDeg: 90,
+  surfTwistDeg: -90,
 };
 
 function rebuild() {

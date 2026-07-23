@@ -90,7 +90,11 @@ export function buildSpiralBand(face, params = {}) {
 
   const place = (theta) => {
     const r = theta <= spiralThetaMax ? r0 * Math.exp(-kSpiral * theta) : hubRadius;
-    const angle = theta + angleOffset;
+    // Negated so the arm sweeps counter-clockwise (tip to hub) as seen from
+    // outside the sphere looking at this face - matches the visual read of
+    // the whole pinwheel's spin direction (dominated by which way the
+    // wide trailing edge leans, not just the raw parametric direction).
+    const angle = angleOffset - theta;
     const u = r * Math.cos(angle);
     const w = r * Math.sin(angle);
     const bulge = bulgeStrength ? bulgeStrength * (1 - Math.pow(r / R, 2)) : 0;
