@@ -38,18 +38,20 @@
   <div id="scene-container"></div>
   <div id="panel">
     <h1>Option B prototype: 5-arm spiral star</h1>
-    <p class="sub">A single face rendered in isolation: 5 rotationally-symmetric wide, logarithmic-spiral arms (one per pentagon vertex), each curling partway to the center and tapering to a point. Not wired into the full dodecahedron yet. Set "Hole loop turns" above 0 to close each tip into a small terminal eye-hole instead of a plain point.</p>
+    <p class="sub">A single face rendered in isolation: 5 rotationally-symmetric wide, logarithmic-spiral arms (one per pentagon vertex), each curling partway to the center and continuously tapering to a point (not staying constant-width). Not wired into the full dodecahedron yet. Set "Hole loop turns" above 0 to close each tip into a small terminal eye-hole instead of a plain point.</p>
 
     <div class="row"><label><span>Arm count</span><span id="v-armCount">5</span></label><input id="armCount" type="range" min="3" max="8" step="1" value="5"></div>
-    <div class="row"><label><span>Turns per arm</span><span id="v-turns">0.35</span></label><input id="turns" type="range" min="0.1" max="1.5" step="0.05" value="0.35"></div>
+    <div class="row"><label><span>Turns per arm</span><span id="v-turns">0.15</span></label><input id="turns" type="range" min="0.05" max="1.5" step="0.05" value="0.15"></div>
     <div class="row"><label><span>Hole loop turns</span><span id="v-holeLoopTurns">0</span></label><input id="holeLoopTurns" type="range" min="0" max="1" step="0.05" value="0"></div>
-    <div class="row"><label><span>Hole radius / R_out (tip taper target)</span><span id="v-rHoleFrac">0.22</span></label><input id="rHoleFrac" type="range" min="0.04" max="0.45" step="0.01" value="0.22"></div>
-    <div class="row"><label><span>Band half-width / R_out</span><span id="v-bandHalfWidth">0.075</span></label><input id="bandHalfWidth" type="range" min="0.02" max="0.25" step="0.005" value="0.075"></div>
-    <div class="row"><label><span>Tip taper width fraction</span><span id="v-endHalfWidthFrac">0.15</span></label><input id="endHalfWidthFrac" type="range" min="0.05" max="1" step="0.01" value="0.15"></div>
-    <div class="row"><label><span>Thickness / R_out</span><span id="v-thickness">0.05</span></label><input id="thickness" type="range" min="0.01" max="0.12" step="0.005" value="0.05"></div>
-    <div class="row"><label><span>Bulge strength</span><span id="v-bulgeStrength">0.2</span></label><input id="bulgeStrength" type="range" min="0" max="0.6" step="0.01" value="0.2"></div>
-    <div class="row"><label><span>Tip-dip strength</span><span id="v-tipDipStrength">0.36</span></label><input id="tipDipStrength" type="range" min="0" max="0.8" step="0.01" value="0.36"></div>
-    <div class="row"><label><span>Surface twist (deg)</span><span id="v-surfTwistDeg">30</span></label><input id="surfTwistDeg" type="range" min="0" max="90" step="1" value="30"></div>
+    <div class="row"><label><span>Hole radius / R_out (tip target radius)</span><span id="v-rHoleFrac">0.04</span></label><input id="rHoleFrac" type="range" min="0.02" max="0.45" step="0.01" value="0.04"></div>
+    <div class="row"><label><span>Band half-width / R_out (max width)</span><span id="v-bandHalfWidth">0.145</span></label><input id="bandHalfWidth" type="range" min="0.02" max="0.25" step="0.005" value="0.145"></div>
+    <div class="row"><label><span>Tip width fraction</span><span id="v-tipWidthFrac">0.08</span></label><input id="tipWidthFrac" type="range" min="0" max="1" step="0.01" value="0.08"></div>
+    <div class="row"><label><span>Width taper power</span><span id="v-widthTaperPower">1.2</span></label><input id="widthTaperPower" type="range" min="0.4" max="3" step="0.05" value="1.2"></div>
+    <div class="row"><label><span>Thickness / R_out</span><span id="v-thickness">0.055</span></label><input id="thickness" type="range" min="0.01" max="0.12" step="0.005" value="0.055"></div>
+    <div class="row"><label><span>Tip thickness fraction</span><span id="v-tipThicknessFrac">0.5</span></label><input id="tipThicknessFrac" type="range" min="0.1" max="1" step="0.01" value="0.5"></div>
+    <div class="row"><label><span>Bulge strength</span><span id="v-bulgeStrength">0.15</span></label><input id="bulgeStrength" type="range" min="0" max="0.6" step="0.01" value="0.15"></div>
+    <div class="row"><label><span>Tip-dip strength</span><span id="v-tipDipStrength">0</span></label><input id="tipDipStrength" type="range" min="0" max="0.8" step="0.01" value="0"></div>
+    <div class="row"><label><span>Surface twist (deg)</span><span id="v-surfTwistDeg">90</span></label><input id="surfTwistDeg" type="range" min="0" max="90" step="1" value="90"></div>
 
     <div id="metrics"></div>
   </div>

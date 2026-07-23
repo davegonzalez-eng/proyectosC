@@ -524,6 +524,55 @@ adjacency rule, then replacing every face's star + fill with this motif)
 is the next step, pending a read on whether this shape is the right
 direction before that larger effort.
 
+### 13b. Fine-tuning proportions: measured coverage sweep, then a real width taper
+
+`spiral-prototype-main.js` exposes `window.__spiralProto` (`setParams()` to
+mutate params/sync the slider UI/rebuild, `getPentagonScreenPoly()` to
+project the face's own pentagon corners to screen pixels under the current
+camera) so a script can drive the isolated prototype the same way a person
+dragging sliders would. Used to sweep arm width (`bandHalfWidth`), curl
+(`turns`) and center reach (`rHoleFrac`) and measure an actual **Surface
+Coverage Ratio** (band pixels ÷ pentagon pixels in a straight-on shot, via
+the projected polygon) instead of eyeballing screenshots - coverage rose
+from 29% at the original defaults to 57% at the widest/most-curled variant
+tried, while a grid of in-between variants confirmed the 5-arm pinwheel
+shape survives (doesn't collapse back into a solid donut) well past that
+point.
+
+Picking proportions from that sweep surfaced a second issue: the band's
+width was constant through nearly its whole length (only a last-moment
+narrowing right before the tip), so even a well-proportioned pinwheel read
+as 5 blunt paddles rather than pointed star arms. Fixed by replacing the
+old `startHalfWidthFrac`/`endHalfWidthFrac` last-moment taper with a
+**continuous** taper across the whole arm: `tipWidthFrac` (the width at the
+tip, as a fraction of `bandHalfWidth`) and `widthTaperPower` (shapes the
+taper curve - 1 is linear, >1 stays fuller near the rim then narrows more
+sharply close to the tip) replace it, narrowing every station's width
+`Math.pow(t / spiralFrac, widthTaperPower)` of the way from full width down
+to `tipWidthFrac`, normalized against `spiralFrac` (arc length, not
+`theta`) so the taper still finishes exactly at the tip regardless of curl
+amount. Thickness got the analogous `tipThicknessFrac` treatment (kept
+comfortably above 0 so the tapered point doesn't collapse to a
+degenerate zero-thickness edge).
+
+Current defaults (chosen against the sweep + taper fix): `turns=0.15`,
+`rHoleFrac=0.04`, `bandHalfWidth=0.145`, `tipWidthFrac=0.08`,
+`widthTaperPower=1.2`, `thickness=0.055`, `tipThicknessFrac=0.5`,
+`bulgeStrength=0.15`, `tipDipStrength=0`, `surfTwistDeg=90` - a tight,
+low-turning pinwheel (54° per arm) of arms that taper continuously from a
+wide head to a fine point, with a strong 90° surface twist giving each
+blade a pronounced 3D curl.
+
+Checked standalone under Node: zero NaN/Infinity; sampling one arm's actual
+extruded cross-section width at t = 0, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 1
+gives 0.070, 0.139, 0.166, 0.145, 0.106, 0.061, 0.033, 0.014 - width rises
+over the short rim-attachment ramp, peaks once, then **strictly
+decreases** the rest of the way to the tip, confirming a real continuous
+taper rather than a late-moment one. Checked in headless Chromium: zero
+console errors; straight-on view shows 5 arms each clearly tapering from a
+wide head to a fine point; angled view confirms the taper holds up with
+the slab's real thickness and the surface twist's 3D curl.
+
 ## File layout
 
 ```

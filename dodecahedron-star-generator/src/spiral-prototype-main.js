@@ -66,15 +66,17 @@ let bandMesh = null;
 
 const params = {
   armCount: 5,
-  turns: 0.35,
+  turns: 0.15,
   holeLoopTurns: 0,
-  rHoleFrac: 0.22,
-  bandHalfWidth: 0.075,
-  endHalfWidthFrac: 0.15,
-  thickness: 0.05,
-  bulgeStrength: 0.2,
-  tipDipStrength: 0.36,
-  surfTwistDeg: 30,
+  rHoleFrac: 0.04,
+  bandHalfWidth: 0.145,
+  tipWidthFrac: 0.08,
+  widthTaperPower: 1.2,
+  thickness: 0.055,
+  tipThicknessFrac: 0.5,
+  bulgeStrength: 0.15,
+  tipDipStrength: 0,
+  surfTwistDeg: 90,
 };
 
 function rebuild() {
@@ -110,8 +112,10 @@ bindSlider('turns', 'turns');
 bindSlider('holeLoopTurns', 'holeLoopTurns');
 bindSlider('rHoleFrac', 'rHoleFrac');
 bindSlider('bandHalfWidth', 'bandHalfWidth');
-bindSlider('endHalfWidthFrac', 'endHalfWidthFrac');
+bindSlider('tipWidthFrac', 'tipWidthFrac');
+bindSlider('widthTaperPower', 'widthTaperPower');
 bindSlider('thickness', 'thickness');
+bindSlider('tipThicknessFrac', 'tipThicknessFrac');
 bindSlider('bulgeStrength', 'bulgeStrength');
 bindSlider('tipDipStrength', 'tipDipStrength');
 bindSlider('surfTwistDeg', 'surfTwistDeg');

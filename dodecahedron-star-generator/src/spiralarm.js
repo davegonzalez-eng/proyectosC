@@ -27,9 +27,14 @@
 // direction) is built the same way startube.js orients its flattened cut
 // ends: major = cross(tangent, radial-from-sphere-center), so the band lies
 // flat against the sphere's surface everywhere along its length, not just
-// at its endpoints. Width and thickness are constant for nearly the whole
-// length, only tapering down near the rim attachment (t=0) to whatever a
-// future fusion with a neighboring face's band would need to match.
+// at its endpoints. Width and thickness continuously taper from their
+// widest (reached shortly after the rim attachment) down to `tipWidthFrac`/
+// `tipThicknessFrac` by the tip - like a real paisley arm, wide at the head
+// and narrowing the whole way to a point, rather than staying constant-
+// width until a last-moment narrowing. The rim end itself first ramps up
+// from a thinner `startHalfWidthFrac` over the first ~5% of the arm, to
+// whatever a future fusion with a neighboring face's band would need to
+// match.
 
 import * as THREE from 'three';
 import { applySurfaceTwist, applyTipDip } from './geometry.js';
@@ -46,11 +51,13 @@ function smoothstep(edge0, edge1, x) {
  * @param {number} [params.holeLoopTurns=0.85] extra turns at ~constant radius that close the terminal eye-hole
  * @param {number} [params.tipScale=0.95] starting radius at the rim, as a fraction of face.R_out
  * @param {number} [params.rHoleFrac=0.16] hole-loop radius, as a fraction of face.R_out
- * @param {number} [params.bandHalfWidth=0.22] half-width of the band (fraction of face.R_out), constant along nearly the whole length
- * @param {number} [params.startHalfWidthFrac=0.4] half-width at t=0 as a fraction of bandHalfWidth, tapering up to full width
- * @param {number} [params.endHalfWidthFrac=0.32] half-width during the closing hole loop, as a fraction of bandHalfWidth - must be small enough that the loop's swept width doesn't fill in its own radius (rHoleFrac), or there's no visible hole
- * @param {number} [params.thickness=0.05] slab thickness (fraction of face.R_out) through most of the band
+ * @param {number} [params.bandHalfWidth=0.22] half-width of the band at its widest (fraction of face.R_out) - reached shortly after the rim attachment, then continuously tapering toward the tip
+ * @param {number} [params.startHalfWidthFrac=0.4] half-width at t=0 as a fraction of bandHalfWidth, tapering up to full width over the first ~5% of the arm
+ * @param {number} [params.tipWidthFrac=0.15] half-width at the tip (or, if `holeLoopTurns` > 0, throughout the closing loop), as a fraction of bandHalfWidth - the body continuously narrows from full width down to this over the whole spiral, like a real paisley tapering from a wide head to a point, not staying constant-width until a last-moment taper
+ * @param {number} [params.widthTaperPower=1] shapes the taper curve (fraction of the way from rim to tip, raised to this power, drives the lerp toward tipWidthFrac): 1 = linear, >1 stays near full width longer then narrows sharply close to the tip, <1 narrows early and stays thin longer
+ * @param {number} [params.thickness=0.05] slab thickness (fraction of face.R_out) at its thickest, tapering the same way width does
  * @param {number} [params.startThicknessFrac=0.6] thickness at t=0 as a fraction of `thickness`
+ * @param {number} [params.tipThicknessFrac=0.5] thickness at the tip, as a fraction of `thickness` - kept well above 0 so the tapered point doesn't collapse to a degenerate zero-thickness edge
  * @param {number} [params.bulgeStrength=0] dome height at the face center, same convention as buildStar
  * @param {number} [params.tipDipStrength=0] inward pull toward the sphere center, same convention as buildStar
  * @param {number} [params.surfTwistDeg=0] surface twist (deg), same convention as buildStar's applySurfaceTwist
@@ -67,9 +74,11 @@ export function buildSpiralBand(face, params = {}) {
     rHoleFrac = 0.16,
     bandHalfWidth = 0.22,
     startHalfWidthFrac = 0.4,
-    endHalfWidthFrac = 0.32,
+    tipWidthFrac = 0.15,
+    widthTaperPower = 1,
     thickness = 0.05,
     startThicknessFrac = 0.6,
+    tipThicknessFrac = 0.5,
     bulgeStrength = 0,
     tipDipStrength = 0,
     surfTwistDeg = 0,
@@ -135,21 +144,27 @@ export function buildSpiralBand(face, params = {}) {
     const minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
 
     const startBlend = smoothstep(0, 0.08, t);
-    // Taper the band down to a thin strand before it enters the closing
-    // hole loop, so that thin strand's swept width stays narrower than the
-    // loop's radius - otherwise the loop just fills in solid instead of
-    // leaving an open terminal eye-hole (see spiral-prototype.html notes).
-    const loopTaperBlend = smoothstep(spiralFrac * 0.75, spiralFrac, t);
+    // Continuous taper from full width/thickness down to the tip values,
+    // across the WHOLE spiral body (not just a last-moment narrowing) - a
+    // real paisley arm is wide near its "head" at the rim and narrows the
+    // whole way to a point, it doesn't stay constant-width until the very
+    // end. Normalized against `spiralFrac` (not raw t) so the taper always
+    // finishes exactly where the spiral body ends - at the tip if there's
+    // no closing loop, or at the loop's own start if there is one, so a
+    // loop (see module docs) begins already at the thin `tipWidthFrac`
+    // strand it needs to read as an open ring rather than a filled disc.
+    const bodyT = spiralFrac > 0 ? Math.min(t / spiralFrac, 1) : 1;
+    const taperCurve = Math.pow(bodyT, widthTaperPower);
     const widthFrac = THREE.MathUtils.lerp(
       THREE.MathUtils.lerp(startHalfWidthFrac, 1, startBlend),
-      endHalfWidthFrac,
-      loopTaperBlend
+      tipWidthFrac,
+      taperCurve
     );
     const halfWidth = bandHalfWidthWorld * widthFrac;
     const halfT = (thicknessWorld * THREE.MathUtils.lerp(
       THREE.MathUtils.lerp(startThicknessFrac, 1, startBlend),
-      endHalfWidthFrac,
-      loopTaperBlend
+      tipThicknessFrac,
+      taperCurve
     )) / 2;
 
     stations.push({
@@ -215,8 +230,8 @@ export function buildSpiralBand(face, params = {}) {
  * per pentagon vertex - the same "vertex 0, 1, 2..." directions the old
  * 5-thin-arm star used, so a future version can reuse the same rim
  * connection points) rotated copies of `buildSpiralBand` and merges them
- * into a single geometry - a pinwheel of wide, curling, constant-width
- * blades instead of either 5 thin arms or 1 giant coil.
+ * into a single geometry - a pinwheel of wide, curling, tapered blades
+ * instead of either 5 thin arms or 1 giant coil.
  *
  * @param {Face} face
  * @param {object} [params] same as `buildSpiralBand` (`angleOffset` is set internally per arm and ignored if passed)
