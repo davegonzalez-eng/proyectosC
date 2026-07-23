@@ -1316,6 +1316,64 @@ Arrow Down and 12x Arrow Up) confirmed the gaze swings from looking down
 through the perforations at the lamp core to looking up past the horizon
 into open space, as intended.
 
+## 23. Flyover hover clears the slab's real thickness/rim; own panel; Space to pause
+
+Follow-up on §22's fix, which corrected the hover DIRECTION but not its
+DISTANCE: "it is going under (by a tiny bit). I noticed that if I clicked
+the up arrow it was 'showing double' and when increasing the thickness it
+made me think it is flying above the midpoint of the star inner surface
+but below the outer surface."
+
+**Root cause.** `mapStarPoint` (and so `mapArmCenterlineWithNormal`)
+returns the star sheet's MIDPLANE - `mapSolidStarToFace` builds the actual
+rendered top/bottom sheets by offsetting *that* by `+-thickness/2` along
+the normal, and the rim bead sits proud of the top sheet by another
+`rimProudFrac` right where the boundary passes near the tip. The flyover's
+hover distance was a flat `0.02` (fraction of R), completely independent
+of those two params. At the defaults (thickness 0.015, rimProudFrac 0.02)
+the true outer surface sits at `0.0075 + 0.02 = 0.0275` above the
+midplane - already past the old 0.02 hover, so the camera was hovering to
+a point still BELOW the true outer surface: literally sandwiched between
+the two sheets. That's exactly what the user diagnosed ("above the
+midpoint... but below the outer surface") and exactly what produces
+"showing double" - a camera behind the alpha-tested top sheet sees both
+its own underside and whatever's visible through its perforation holes,
+layered.
+
+**Fix.** `hoverFrac` is now computed from the actual current params -
+`thickness/2 + (showRim ? rimProudFrac : 0) + 0.02` margin - instead of a
+disconnected constant, so it always clears the real outer surface (and
+stays correct if those sliders change later). The horn-arc segments had
+the same class of bug one level worse: they had NO hover at all, sitting
+exactly on the arc tube's own centerline - i.e. inside the solid tube the
+whole time. Fixed the same way, clearing `max(rimProudFrac, 0.005)` (the
+tube's own half-height, matching the `arcHeight` used when the tube is
+actually built) plus the same margin.
+
+**Separate panel.** The Flyover controls (enable checkbox, speed slider,
+keyboard hints) moved out of the main parameters panel into their own
+small floating panel (bottom-left) - it's a mode you fly in, not a shape
+parameter, and mixing it into two dozen sliders meant it could vanish
+whenever that panel collapsed.
+
+**Space to pause/resume.** A `flyoverSpeedBeforePause` variable remembers
+whatever speed was actually set - not a hardcoded default - the moment
+Space zeroes it, and restores exactly that value on the next press
+(falling back to 0.33 only if paused some other way, e.g. dragging the
+speed slider to 0 directly). The speed slider's displayed value updates
+to match either way.
+
+Checked standalone under Node: with current defaults, the old hover
+(0.02) sits *below* the true outer surface (0.0275) - reproducing the
+bug analytically - while the new hover (0.0475) clears it with a 0.02
+margin; the horn-arc tube fix similarly goes from 0 clearance to 0.02.
+Checked in headless Chromium (same two-phase `performance.now`
+monkey-patch technique as §22) at a tip-crossing point with the tilt
+pushed up (where "showing double" was reported): no double-vision
+artifact. Space-to-pause verified directly: pressing it once from a
+running 0.33 zeroes `params.flyoverSpeed` and the slider; pressing it
+again restores exactly 0.33.
+
 ## File layout
 
 ```

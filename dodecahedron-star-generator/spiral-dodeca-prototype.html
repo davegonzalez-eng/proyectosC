@@ -59,6 +59,29 @@
     #metrics { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); line-height: 1.6; color: #ffd27f; }
     details { margin-top: 10px; color: #9aa0ac; }
     details pre { font-size: 10px; line-height: 1.5; max-height: 200px; overflow-y: auto; background: #0d0f14; padding: 8px; border-radius: 6px; }
+
+    /* Flyover: a separate small floating panel, deliberately apart from
+       the main parameters panel - it's a mode you fly in, not a shape
+       parameter, and keeping it distinct means it can't get lost/
+       collapsed alongside two dozen sliders. */
+    #flyover-panel {
+      position: fixed;
+      bottom: 14px;
+      left: 14px;
+      width: 260px;
+      background: rgba(18, 20, 26, 0.88);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 12px 14px;
+      backdrop-filter: blur(6px);
+      font-size: 12px;
+    }
+    #flyover-panel h2 { font-size: 11px; margin: 0 0 8px; color: #ffd27f; text-transform: uppercase; letter-spacing: 0.5px; }
+    #flyover-panel .hint { margin: 6px 0 0; color: #9aa0ac; line-height: 1.4; font-size: 11px; }
+    #flyover-panel .hint kbd {
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 4px; padding: 0 4px; font-family: inherit;
+    }
   </style>
 </head>
 <body>
@@ -150,11 +173,6 @@
     <h2>Debug</h2>
     <div class="row"><label><span>Click a face to hide it</span><input id="debugFacePick" type="checkbox" checked style="width:auto"></label></div>
 
-    <h2>Flyover</h2>
-    <div class="row"><label><span>Flyover mode (automated tour)</span><input id="flyoverMode" type="checkbox" style="width:auto"></label></div>
-    <div class="row"><label><span>Flyover speed (negative = rewind)</span><span id="v-flyoverSpeed">0.33</span></label><input id="flyoverSpeed" type="range" min="-2" max="2" step="0.01" value="0.33"></div>
-    <p class="sub" style="margin: -4px 0 0;">Arrow Up/Down tilts the view above/below the surface while flying.</p>
-
     <h2>Export</h2>
     <div class="row"><button id="exportSettings" style="width:100%; padding:6px; background:#2a2d38; color:#e8e8ec; border:1px solid rgba(255,255,255,0.15); border-radius:5px; cursor:pointer;">Copy settings table</button></div>
     <div class="row" id="exportStatus" style="color:#7fd1ff;"></div>
@@ -166,6 +184,13 @@
       <pre id="conn-list"></pre>
     </details>
     </div>
+  </div>
+
+  <div id="flyover-panel">
+    <h2>Flyover</h2>
+    <div class="row"><label><span>Enabled</span><input id="flyoverMode" type="checkbox" style="width:auto"></label></div>
+    <div class="row"><label><span>Speed (negative = rewind)</span><span id="v-flyoverSpeed">0.33</span></label><input id="flyoverSpeed" type="range" min="-2" max="2" step="0.01" value="0.33"></div>
+    <p class="hint"><kbd>Space</kbd> pause/resume &middot; <kbd>&uarr;</kbd>/<kbd>&darr;</kbd> tilt view</p>
   </div>
 
   <script type="importmap">

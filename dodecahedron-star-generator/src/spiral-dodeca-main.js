@@ -287,7 +287,21 @@ function disposeGroup(group) {
 // playback time.
 function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
   const R = star2D.R;
-  const hoverFrac = 0.02; // hover just outside the arm's external surface
+  // `mapStarPoint` (and so `mapArmCenterlineWithNormal`) returns the star
+  // sheet's MIDPLANE, not its outer surface - the sheet has real thickness
+  // (top/bottom sheets each offset by params.thickness/2 off that midplane
+  // in mapSolidStarToFace), plus - right near the tip, where the boundary
+  // passes close to the centerline - the rim bead's own proud height on
+  // top of that. A fixed hover distance that doesn't clear BOTH of those
+  // leaves the camera sandwiched between the two sheets: reported as
+  // "going under by a tiny bit" and a "showing double" artifact near the
+  // tip (the camera behind the alpha-tested top sheet, looking at both its
+  // underside and whatever peeks through the perforation holes above it).
+  // Computed from the actual current slab/rim params (not a fixed
+  // constant) so it stays correct if those sliders change, plus a margin.
+  const halfThickness = (params.thickness ?? 0.015) / 2;
+  const rimBump = params.showRim ? (params.rimProudFrac ?? 0) : 0;
+  const hoverFrac = halfThickness + rimBump + 0.02;
   const armCount = 5;
 
   const neighbors = new Map();
@@ -359,6 +373,12 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
       depthFraction: params.extDepthFraction,
       clothoidFactor: params.extClothoid,
     });
+    // Same "don't fly through the solid material" fix as the arm hover:
+    // arcFn returns the horn-arc TUBE's own centerline, which has a real
+    // cross-section radius (arcHeight/2 = R*max(rimProudFrac,0.005) in
+    // rebuild()'s buildHornArc call) - hovering right on it puts the
+    // camera inside the tube. Clear it with the same margin.
+    const arcHoverFrac = Math.max(params.rimProudFrac ?? 0, 0.005) + 0.02;
     for (let i = 0; i <= arcSamples; i++) {
       const s = i / arcSamples;
       const p = arcFn(s);
@@ -367,7 +387,8 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
       let right = new THREE.Vector3().crossVectors(tangent, outward);
       if (right.lengthSq() < 1e-10) right.set(1, 0, 0); else right.normalize();
       const w = Math.sin(Math.PI * s); // 0 at both cusps, 1 at mid-arc
-      pushPoint(p.clone().addScaledVector(right, R * 0.07 * w), outward, right.clone().multiplyScalar(-R * 0.18 * w));
+      const hovered = p.clone().addScaledVector(outward, arcHoverFrac * R).addScaledVector(right, R * 0.07 * w);
+      pushPoint(hovered, outward, right.clone().multiplyScalar(-R * 0.18 * w));
     }
 
     currentLabel = chosenLabel;
@@ -659,12 +680,17 @@ let flyoverLastMs = null;
 // "horizon" (down into the surface) to above it (out past the rim), on
 // top of whatever baseline tilt this build already has.
 let flyoverTiltOffset = 0;
+// Speed to restore on resume - whatever was set (via slider or default)
+// the moment Space paused it - so pausing/resuming never loses the
+// user's chosen speed the way just remembering a hardcoded default would.
+let flyoverSpeedBeforePause = null;
 function setFlyoverMode(on) {
   params.flyoverMode = on;
   controls.enabled = !on;
   if (on) {
     flyoverT = 0;
     flyoverLastMs = null; // no dt on the first frame after (re)enabling
+    flyoverSpeedBeforePause = null;
   } else {
     camera.position.copy(DEFAULT_CAMERA_POS);
     camera.up.set(0, 1, 0);
@@ -679,6 +705,16 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
   } else if (e.key === 'ArrowUp') {
     flyoverTiltOffset = Math.max(-FLYOVER_TILT_MAX, flyoverTiltOffset - FLYOVER_TILT_STEP);
+    e.preventDefault();
+  } else if (e.code === 'Space') {
+    if (params.flyoverSpeed !== 0) {
+      flyoverSpeedBeforePause = params.flyoverSpeed;
+      params.flyoverSpeed = 0;
+    } else {
+      params.flyoverSpeed = flyoverSpeedBeforePause || 0.33;
+      flyoverSpeedBeforePause = null;
+    }
+    syncControl('flyoverSpeed');
     e.preventDefault();
   }
 });
