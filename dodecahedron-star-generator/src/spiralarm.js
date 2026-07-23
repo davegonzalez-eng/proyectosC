@@ -302,13 +302,24 @@ export function buildHubCap(face, params = {}) {
  * A `buildHubCap` disc is merged in too, plugging the small gap that would
  * otherwise remain at the exact center (see `buildHubCap`'s docs).
  *
+ * `starRotationDeg` rotates the WHOLE star about its face normal (every
+ * arm's starting angle shifted together). With the same rotation applied
+ * on every face, each arm's tip no longer points at its pentagon vertex -
+ * it reaches across the face edge toward a GAP between two arms of the
+ * (equally rotated) neighboring star, which is what lets arms visually
+ * dive under their neighbors instead of meeting them point-to-point at
+ * the shared vertex. Same idea as the "OFFSET (star rotation)" control in
+ * the earlier Quin raymarched study this borrows from.
+ *
  * @param {Face} face
  * @param {object} [params] same as `buildSpiralBand` (`angleOffset` is set internally per arm and ignored if passed), plus `buildHubCap`'s `capRadiusFrac`
  * @param {number} [params.armCount=5]
+ * @param {number} [params.starRotationDeg=0] rotates the whole star about the face normal (deg, CCW)
  * @returns {{geometry: THREE.BufferGeometry, arms: Array<{geometry: THREE.BufferGeometry, points: THREE.Vector3[], metrics: object, armIndex: number}>}}
  */
 export function buildSpiralStar(face, params = {}) {
-  const { armCount = 5, capRadiusFrac, ...armParams } = params;
+  const { armCount = 5, capRadiusFrac, starRotationDeg = 0, ...armParams } = params;
+  const starRotationRad = THREE.MathUtils.degToRad(starRotationDeg);
 
   const arms = [];
   const positions = [];
@@ -324,7 +335,7 @@ export function buildSpiralStar(face, params = {}) {
   };
 
   for (let i = 0; i < armCount; i++) {
-    const angleOffset = (i * Math.PI * 2) / armCount;
+    const angleOffset = (i * Math.PI * 2) / armCount + starRotationRad;
     const arm = buildSpiralBand(face, { ...armParams, angleOffset });
     arms.push({ ...arm, armIndex: i });
     addGeometry(arm.geometry);

@@ -726,6 +726,46 @@ exposed as small free spikes (each arm has exactly one real ribbon
 touching its own tip - the one where it's the *source* - since incoming
 connections now land in a neighboring gap instead).
 
+### 14c. Blending in the earlier hex-web study: rotated stars weave under each other
+
+The user's earlier raymarched study ("Quin Swirling Hex-Web") achieved
+the interlocking look a different way: a global **star rotation offset**
+(23° about each face normal) plus arms whose tips reach nearly to the
+sphere radius. With every star rotated identically, an arm no longer
+points at its pentagon vertex - it points at a GAP between two arms of
+the equally-rotated neighboring star, and with enough reach it passes
+across the face edge into that gap. That - not connector pieces - is
+what makes the stars read as woven together.
+
+Blended into the mesh-based prototype, keeping this project's tapered
+spiral-curl arms and wider gaps:
+
+- `buildSpiralStar()` gains `starRotationDeg` (default 0; the dodeca page
+  sets 23): the whole star rotates about its face normal, every arm's
+  starting angle shifted together.
+- The dodeca page now exposes `tipScale` ("Tip reach", default 1.05):
+  tips physically extend past their own face's edge into the neighbor's
+  territory.
+- `tipDipStrength` default raised to 0.3: the tip dip is exactly the
+  mechanism that pulls those overreaching ends back toward the sphere
+  center, so they duck UNDER the neighboring star's surface instead of
+  hovering above it. (Verified numerically: with reach 1.05 and dip 0.3,
+  a tip sits at radius 1.87 vs 2.04 undipped.)
+- `armpitPoint()` tracks the same rotation, so optional ribbon landings
+  stay in the (rotated) gaps.
+- **Connector ribbons now default OFF** (new checkbox): with rotation +
+  reach + dip, the arms THEMSELVES weave under their neighbors, and the
+  ribbons on top read as clutter. The whole 60-ribbon system stays one
+  checkbox away for comparison.
+
+Checked standalone under Node: arm 0's tip lands at exactly 23.00° with
+rotation 23 and exactly 1.05 x R_out with reach 1.05; zero NaN/Infinity
+across all 12 faces. Checked in headless Chromium: zero console errors;
+the render now reads as 12 rotated pinwheel stars whose curled arms
+visibly slide through the gaps of their neighbors and disappear
+underneath - the earlier study's interlock, carried by this project's
+sea-star arms.
+
 ## File layout
 
 ```

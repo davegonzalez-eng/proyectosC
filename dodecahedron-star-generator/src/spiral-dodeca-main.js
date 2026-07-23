@@ -86,8 +86,27 @@ const params = {
   thickness: 0.015,
   tipThicknessFrac: 0.43,
   bulgeStrength: 0.08,
-  tipDipStrength: 0,
+  // With tipScale > 1 the tips reach past their own face's edge; the tip
+  // dip pulls exactly those overreaching ends back toward the sphere
+  // center, so they duck UNDER the neighboring star's surface instead of
+  // hovering above it.
+  tipDipStrength: 0.3,
   surfTwistDeg: -15,
+  // With rotation + reach + dip, the arms THEMSELVES weave under their
+  // neighbors - the separate ribbon connectors from the earlier tip-to-tip
+  // wiring are redundant visual clutter on top of that, so they default
+  // off (toggle below to compare).
+  showRibbons: false,
+  // Borrowed from the earlier Quin raymarched study ("OFFSET (star
+  // rotation)" there, default 23 deg): rotating every star about its own
+  // face normal makes each arm point at a GAP between two arms of the
+  // (equally rotated) neighboring star instead of at the shared pentagon
+  // vertex - the geometric precondition for arms diving under their
+  // neighbors. tipScale (that study's "TIP RADIUS") additionally lets the
+  // arms physically reach past their own face's edge into the neighbor's
+  // territory.
+  starRotationDeg: 23,
+  tipScale: 1.05,
   ribbonWidthFactor: 1.15,
   ribbonTwistTurns: 0.4,
   ribbonDepthFraction: 0.94,
@@ -113,7 +132,9 @@ const params = {
  */
 function armpitPoint(face, armIndex, neighborOffset, radiusFrac) {
   const R = face.R_out;
-  const armAngle = (armIndex * Math.PI * 2) / 5;
+  // The neighbor's arms rotate with starRotationDeg, so its gaps do too -
+  // the armpit angle must track the same rotation the arms get.
+  const armAngle = (armIndex * Math.PI * 2) / 5 + THREE.MathUtils.degToRad(params.starRotationDeg);
   const angle = armAngle + (neighborOffset * Math.PI * 2) / 5 / 2;
   const r = R * radiusFrac;
   const u = r * Math.cos(angle);
@@ -173,7 +194,7 @@ function rebuild() {
   const tipThickness = R * params.thickness * params.tipThicknessFrac;
 
   let missing = 0;
-  for (const { a, b } of connections) {
+  for (const { a, b } of (params.showRibbons ? connections : [])) {
     const tipA = tipsByLabel.get(a);
     const bMatch = b.match(LABEL_RE);
     if (!tipA || !bMatch) {
@@ -211,7 +232,7 @@ function rebuild() {
 
   document.getElementById('metrics').innerHTML =
     `Faces: ${faces.length}<br>` +
-    `Connections: ${connections.length}${missing ? ` (${missing} missing tips!)` : ''}<br>` +
+    `Connections: ${params.showRibbons ? `${connections.length} ribbons${missing ? ` (${missing} missing tips!)` : ''}` : 'arms weave directly (ribbons off)'}<br>` +
     `Tips resolved: ${tipsByLabel.size} / 60`;
 }
 
@@ -226,6 +247,8 @@ function bindSlider(id, key) {
   });
 }
 
+bindSlider('starRotationDeg', 'starRotationDeg');
+bindSlider('tipScale', 'tipScale');
 bindSlider('turns', 'turns');
 bindSlider('hubRadiusFrac', 'hubRadiusFrac');
 bindSlider('bandHalfWidth', 'bandHalfWidth');
@@ -234,6 +257,7 @@ bindSlider('widthTaperPower', 'widthTaperPower');
 bindSlider('thickness', 'thickness');
 bindSlider('tipThicknessFrac', 'tipThicknessFrac');
 bindSlider('bulgeStrength', 'bulgeStrength');
+bindSlider('tipDipStrength', 'tipDipStrength');
 bindSlider('surfTwistDeg', 'surfTwistDeg');
 bindSlider('ribbonWidthFactor', 'ribbonWidthFactor');
 bindSlider('ribbonTwistTurns', 'ribbonTwistTurns');
@@ -241,6 +265,11 @@ bindSlider('ribbonDepthFraction', 'ribbonDepthFraction');
 bindSlider('ribbonLeaveFraction', 'ribbonLeaveFraction');
 bindSlider('armpitRadiusFrac', 'armpitRadiusFrac');
 bindSlider('armpitNeighborOffset', 'armpitNeighborOffset');
+
+document.getElementById('showRibbons').addEventListener('change', (e) => {
+  params.showRibbons = e.target.checked;
+  rebuild();
+});
 
 rebuild();
 

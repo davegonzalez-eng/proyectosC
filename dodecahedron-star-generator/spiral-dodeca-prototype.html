@@ -38,8 +38,10 @@
   <div id="scene-container"></div>
   <div id="panel">
     <h1>Option B prototype: full dodecahedron</h1>
-    <p class="sub">All 12 faces with the 5-arm spiral-star motif, connected at adjacent faces' arm tips via ribbons using the same adjacency rule the original 5-thin-arm sculpture uses. Arm count is fixed at 5 here - it must match the pentagon's vertex count for the connection rule to apply.</p>
+    <p class="sub">All 12 faces with the 5-arm spiral-star motif. Every star is rotated about its face normal (like the earlier Quin hex-web study's OFFSET control) and its arms reach past the face edge (tip reach &gt; 1) while dipping toward the sphere center - so each arm threads through a gap of the equally-rotated neighboring star and passes underneath it. Optional connector ribbons (using the original adjacency rule) can be layered on top.</p>
 
+    <div class="row"><label><span>Star rotation (deg)</span><span id="v-starRotationDeg">23</span></label><input id="starRotationDeg" type="range" min="-36" max="36" step="1" value="23"></div>
+    <div class="row"><label><span>Tip reach (x R_out)</span><span id="v-tipScale">1.05</span></label><input id="tipScale" type="range" min="0.7" max="1.35" step="0.01" value="1.05"></div>
     <div class="row"><label><span>Turns per arm</span><span id="v-turns">0.1</span></label><input id="turns" type="range" min="0.05" max="1.5" step="0.05" value="0.1"></div>
     <div class="row"><label><span>Hub radius / R_out</span><span id="v-hubRadiusFrac">0.02</span></label><input id="hubRadiusFrac" type="range" min="0.02" max="0.45" step="0.01" value="0.02"></div>
     <div class="row"><label><span>Band half-width / R_out (hub width)</span><span id="v-bandHalfWidth">0.25</span></label><input id="bandHalfWidth" type="range" min="0.02" max="0.4" step="0.005" value="0.25"></div>
@@ -48,7 +50,9 @@
     <div class="row"><label><span>Thickness / R_out</span><span id="v-thickness">0.015</span></label><input id="thickness" type="range" min="0.01" max="0.12" step="0.005" value="0.015"></div>
     <div class="row"><label><span>Tip thickness fraction</span><span id="v-tipThicknessFrac">0.43</span></label><input id="tipThicknessFrac" type="range" min="0.1" max="1" step="0.01" value="0.43"></div>
     <div class="row"><label><span>Bulge strength</span><span id="v-bulgeStrength">0.08</span></label><input id="bulgeStrength" type="range" min="0" max="0.6" step="0.01" value="0.08"></div>
+    <div class="row"><label><span>Tip-dip strength</span><span id="v-tipDipStrength">0.3</span></label><input id="tipDipStrength" type="range" min="0" max="0.6" step="0.01" value="0.3"></div>
     <div class="row"><label><span>Surface twist (deg)</span><span id="v-surfTwistDeg">-15</span></label><input id="surfTwistDeg" type="range" min="-90" max="90" step="1" value="-15"></div>
+    <div class="row"><label><span>Connector ribbons (off: arms weave directly)</span><input id="showRibbons" type="checkbox" style="width:auto"></label></div>
     <div class="row"><label><span>Ribbon width / tip width</span><span id="v-ribbonWidthFactor">1.15</span></label><input id="ribbonWidthFactor" type="range" min="1" max="2.5" step="0.05" value="1.15"></div>
     <div class="row"><label><span>Ribbon twist turns</span><span id="v-ribbonTwistTurns">0.4</span></label><input id="ribbonTwistTurns" type="range" min="0" max="1.5" step="0.05" value="0.4"></div>
     <div class="row"><label><span>Ribbon depth fraction</span><span id="v-ribbonDepthFraction">0.94</span></label><input id="ribbonDepthFraction" type="range" min="0.7" max="1" step="0.01" value="0.94"></div>
