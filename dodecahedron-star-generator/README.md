@@ -628,21 +628,88 @@ motif's own `surfTwistDeg` default flips to `-90` (slider range widened to
 `-90..90`) to read as counter-clockwise. `bandHalfWidth`'s slider range
 also widened (`0.02..0.25` -> `0.02..0.4`) per request.
 
+## 14. Option B wired into the full 12-face sculpture
+
+With one face's proportions settled, the next step was connecting all 12
+faces' spiral stars at adjacent faces' arm tips, reusing
+`computeAdjacentFaceConnections()` - the exact same rule (and the exact
+same 60 pairs) the current 5-thin-arm sculpture uses - completely
+unmodified.
+
+That reuse only works because arm `i`'s tip (`angleOffset = i * 360/5`, at
+`theta=0`) lands at **exactly** the same direction from the face center as
+the old star's arm `i` tip (`face.vertices3D[i]`) - checked standalone
+under Node across all 12 faces with distortion disabled: `0.000` degrees
+of deviation, every face. `computeAdjacentFaceConnections()` is purely
+topological (which faces share which vertex), so its output transfers
+directly onto this motif's own tip positions with no changes to
+`geometry.js` at all.
+
+`src/spiral-dodeca-main.js` / `spiral-dodeca-prototype.html` (another new,
+standalone page - `index.html`/`main.js` still untouched) build all 12
+faces' `buildSpiralStar()` output, collect every arm's tip
+(`{position, outDir, tangent, label: "F<face>-A<arm>"}`, `tangent`
+computed the same way `geometry.js`'s `buildStar` does - pointing outward,
+continuing the arm's own trend past the tip), then for each of the 60
+connection pairs looks up both tips and calls `ribbon.js`'s `buildRibbon()`
+directly between them.
+
+Unlike the old system, there's no tube to cut short and fuse a ribbon
+into - every arm already extends all the way to a real (if narrow) tip
+point - so ribbons connect tip-to-tip directly with no `entryA`/`entryB`
+cut points, sized from the arm's own tip half-width/thickness
+(`bandHalfWidth * tipWidthFrac`, `thickness * tipThicknessFrac`) so the
+seam is width- and thickness-continuous.
+
+**First render was an unrecognizable tangle** - a spiky cage flying far
+outside the sphere's silhouette. Toggling the star and ribbon groups
+independently (`window.__spiralDodeca.setStarsVisible/setRibbonsVisible`,
+added for this diagnosis) isolated the cause immediately: the 12 stars
+*alone* already looked like a coherent, evenly-covered 12-pointed star
+ball - the chaos was 100% the ribbons. Root cause: this motif's arms barely
+curl (`turns=0.1`, a 36° sweep), so a tip's own tangent - measured at
+~97% aligned with pure outward-radial - points almost straight out from
+the sphere, unlike the old thin-arm star's swirled tips, whose tangent
+already leaned tangentially along the surface. `buildRibbon()`'s "leave"
+step (travelling `leaveFraction` of the tip-to-tip span along that
+tangent before curving toward the neighbor) was launching every ribbon
+far outside the shell before it could curve back in. Fixing it needed no
+change to `ribbon.js` itself - just passing a much shorter
+`leaveFraction` (0.06 vs the default 0.22) through from the connection
+loop, keeping the ribbons close to the surface the whole way.
+
+Checked standalone under Node: zero NaN/Infinity across ~117k star
+vertices and ~31k ribbon vertices; all 60 of 60 tip labels resolve (no
+missing lookups) using `computeAdjacentFaceConnections()`'s pairs
+unmodified. Checked in headless Chromium: zero console errors; with the
+short `leaveFraction`, the render reads as a single coherent faceted
+sculpture - 12 recognizable stars linked by ribbons that hug the sphere's
+surface - not a tangle.
+
+This is still a prototype (standalone page, current defaults chosen for
+a reasonably calm render rather than fully matching the reference photos'
+density/coverage) - next steps would be re-running the coverage/turning-
+angle metrics from §13 at the whole-sculpture scale, re-adding the
+terminal eye-hole, and only then considering folding this into
+`main.js`/`index.html` in place of the current 5-thin-arm system.
+
 ## File layout
 
 ```
-index.html                    page shell, collapsible control panel, import map
-spiral-prototype.html         Option B prototype: single face, standalone viewer (§13)
-src/geometry.js                dodecahedron construction, per-face star math, adjacency-connection rule
-src/ribbon.js                  spline-based ribbon geometry (precise dip depth + tangent-matched joins) between two arm tips
-src/startube.js                 star tube cut short of every tip (5 open segments, flat cut edges the ribbons fuse into)
-src/membrane.js                 thin triangulated fill surface for a star's interior
-src/hexgrid.js                   clipped hexagonal-grid fill surface for a star's interior
-src/hextexture.js                procedural tileable hex-pattern canvas texture, applied as a bump map on ribbons
-src/spiralarm.js                 Option B prototype: single wide logarithmic-spiral band per face (§13), not yet wired into main.js
-src/spiral-prototype-main.js     scene/UI for spiral-prototype.html
-src/main.js                     Three.js scene, materials/environment, UI wiring, labels, picking, render loop
-vendor/three/                   vendored Three.js build + OrbitControls + CSS2DRenderer + RoomEnvironment (no CDN/network dependency)
+index.html                     page shell, collapsible control panel, import map
+spiral-prototype.html          Option B prototype: single face, standalone viewer (§13)
+spiral-dodeca-prototype.html   Option B prototype: full 12-face sculpture, standalone viewer (§14)
+src/geometry.js                 dodecahedron construction, per-face star math, adjacency-connection rule
+src/ribbon.js                   spline-based ribbon geometry (precise dip depth + tangent-matched joins) between two arm tips
+src/startube.js                  star tube cut short of every tip (5 open segments, flat cut edges the ribbons fuse into)
+src/membrane.js                  thin triangulated fill surface for a star's interior
+src/hexgrid.js                    clipped hexagonal-grid fill surface for a star's interior
+src/hextexture.js                 procedural tileable hex-pattern canvas texture, applied as a bump map on ribbons
+src/spiralarm.js                  Option B prototype: 5-arm spiral-star motif per face (§13), not yet wired into main.js
+src/spiral-prototype-main.js      scene/UI for spiral-prototype.html
+src/spiral-dodeca-main.js         scene/UI for spiral-dodeca-prototype.html - all 12 faces + adjacency-rule ribbon connections (§14)
+src/main.js                      Three.js scene, materials/environment, UI wiring, labels, picking, render loop
+vendor/three/                    vendored Three.js build + OrbitControls + CSS2DRenderer + RoomEnvironment (no CDN/network dependency)
 ```
 
 ## Verified
