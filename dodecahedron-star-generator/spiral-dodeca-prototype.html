@@ -82,6 +82,25 @@
       background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
       border-radius: 4px; padding: 0 4px; font-family: inherit;
     }
+
+    /* Preset switcher: three branches of the project (the original
+       sculpture, a single-face 3D-printing variant, and the Star Odyssey
+       connector rework) - a standalone panel like Flyover's, since it picks
+       which whole pipeline runs, not a shape parameter within one. */
+    #preset-panel {
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      width: 260px;
+      background: rgba(18, 20, 26, 0.88);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 12px 14px;
+      backdrop-filter: blur(6px);
+      font-size: 12px;
+    }
+    #preset-panel h2 { font-size: 11px; margin: 0 0 8px; color: #ffd27f; text-transform: uppercase; letter-spacing: 0.5px; }
+    #preset-panel .hint { margin: 6px 0 0; color: #9aa0ac; line-height: 1.4; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -184,6 +203,20 @@
       <pre id="conn-list"></pre>
     </details>
     </div>
+  </div>
+
+  <div id="preset-panel">
+    <h2>Preset</h2>
+    <div class="row"><select id="preset">
+      <option value="stardream1" selected>Stardream #1</option>
+      <option value="print3d">Stardream - 3D Printing</option>
+      <option value="starOdyssey">Star Odyssey</option>
+    </select></div>
+    <div class="row" id="singleFaceRow" style="display:none;">
+      <label><span>Face</span><span id="v-singleFaceIndex">0</span></label>
+      <input id="singleFaceIndex" type="range" min="0" max="11" step="1" value="0">
+    </div>
+    <p class="hint" id="preset-hint">Original assembled sculpture, 20 tip-to-tip horn-triangle arcs.</p>
   </div>
 
   <div id="flyover-panel">

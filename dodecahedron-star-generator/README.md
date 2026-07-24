@@ -1449,6 +1449,123 @@ checkbox toggle, several seconds of wall-clock flight, no `performance.now`
 patching) with zero console/page errors, confirming the whole thing holds
 up under normal playback, not just at hand-picked sample points.
 
+## 25. Three presets: Stardream #1, Stardream - 3D Printing, Star Odyssey
+
+The user asked to branch the project into three selectable presets (a new
+dropdown, top-right, standalone like the Flyover panel): the current
+sculpture unchanged as "Stardream #1"; a "Stardream - 3D Printing" preset
+focused on one detailed, printable face with a snap-together joint
+mechanism at the tips; and a "Star Odyssey" preset that reworks the
+connector itself - instead of the horn-arc bowing tip-to-tip around the
+outside, each of the three meeting tips spirals inward, converging at the
+horn-triangle's own center.
+
+Two design decisions were the user's call, not mine, so I asked before
+building: the snap mechanism (peg + socket friction fit, over dovetail or a
+print-in-place cantilever clip - simplest to get right on a first pass, no
+supports needed at the joint) and the 3-way joint topology (a small
+separate corner hub piece per vertex, 20 total, rather than the three tips
+interlocking directly with each other - the hub does the alignment work,
+which is far more forgiving across 20 joints than three-way pairwise
+features would be).
+
+**Preset architecture.** `PRESETS` is three complete parameter bundles
+(shape, appearance, AND mode flags - each is a full snapshot, not just a
+diff off whatever was set before, so switching presets can't leave a
+previous preset's material/pattern/lamp-mode stuck in place). Selecting one
+calls the existing `setParams()` machinery. New mode params:
+`singleFaceMode`/`singleFaceIndex` (render one face only), `connectorStyle`
+(`hornArc` / `snapHub` / `spiralVortex`), and `snapEnabled` plus the
+snap/spiral shape params.
+
+**`computeThreeCycles`** (geometry.js): the 60 connection pairs chain into
+20 closed 3-cycles - one per dodecahedron vertex - but nothing before this
+needed to see three tips at once (`buildHornArc` only ever looks at one
+pair). Brute-force triangle-finding on the 60-node adjacency graph (for
+every label, for every pair of its neighbors, check if THEY'RE connected
+too); checked under Node: 20 triples, covering all 60 pairs with none left
+over.
+
+**Stardream - 3D Printing.** Renders only `faces[singleFaceIndex]` -
+hidden faces skip the expensive top/bottom-sheet + wall build entirely via
+a new `computeArmTips` (the tip-position/tangent/curvature computation
+factored out of `mapSolidStarToFace`, which still needs to run for every
+face since tips near the isolated one are needed for its snap-hub pieces).
+Tip width/thickness are pulled way up from the display defaults (0.12/0.17
+-> 0.4/0.6) - the printability assessment this follows up on found that
+even at a generous 250mm print, the display-default tip wall measured under
+0.15mm, well below a single 0.4mm nozzle line; this preset is explicitly
+allowed to look chunkier so there's real material to work with.
+
+*Snap-hole sockets*: a REAL geometric through-hole (not the alphaMap-
+texture perforation elsewhere in the app) cut into each arm tip, sized for
+a peg pushed through the thin sheet. `buildSolidStar2D`'s field is a
+signed-distance union of arm distances - standard CSG subtraction
+(`max(field, -holeSDF)`) cuts a crisp-edged circular hole wherever wanted,
+reusing the existing marching-squares/boundary-loop/wall-building pipeline
+unchanged (a hole is just another boundary loop to it). The hole center is
+placed by walking the arm's own centerline `snapHoleInsetFrac * R` in from
+the tip (arc length, not a fixed sample index) so its full circumference
+lands in solid material instead of notching the tip edge.
+
+*Snap-hub piece* (`buildSnapHubGroup`): a small separate part per vertex -
+body at `hornTriangleCenter` (the centroid of the three tips, "the center
+of the current circular horn triangle"), three pegs reaching toward each
+tip's socket, each driven deep into the body so the overlapping solid
+primitives print fine without true CSG union (no boolean library is
+vendored; this leans on that instead, same as a real print would need
+either way). Only the up-to-5 hubs actually touching the isolated face get
+built.
+
+**Star Odyssey.** Same star/arm geometry as Stardream #1 - the brief was to
+change the connection, not the stars - but `buildSpiralVortexGroup`
+replaces every horn-arc pair with a 3-way conical spiral converging at
+`hornTriangleCenter`: each tip's own outward tangent (projected
+perpendicular to the tip-to-center axis) sets the spiral's initial sweep
+direction, so the connector at least leaves the tip continuing the arm's
+lean, though exact curvature/tangent matching (like the horn arc's
+clothoid fit) isn't attempted - there's no single natural tangent to match
+at a point three curves converge on, unlike the paired horn arc. Sweep
+radius shrinks LINEARLY to a small nub while the angle keeps advancing at a
+constant rate (a conical, not logarithmic, spiral - avoids the log/exp
+singularity a true logarithmic spiral has at r -> 0).
+
+**Two real bugs, caught before shipping:**
+- First pass sized the print preset's `fieldGrid`/`subdivisions` for
+  maximum smoothness (220/4) since only one face gets built now - but
+  under this environment's software-rendered headless Chromium, the
+  resulting ~660k-vertex single face made every frame slow enough that
+  Playwright's screenshot call timed out at 2 minutes. Dropped to
+  180/3 (~210k vertices, ~750ms to build) - still comfortably more detail
+  than the display default's 144/3 across twelve faces, and interactive
+  again.
+- Switching presets originally only changed whatever keys each preset's
+  bundle happened to mention - going 3D-Printing -> Stardream #1 correctly
+  restored the shape/mode but left the PREVIOUS preset's matte-white/no-
+  pattern/lamp-off appearance in place, since Stardream #1's bundle never
+  mentioned those keys. Caught by an actual round-trip screenshot (not just
+  "does it error"), which showed a colorless "Stardream #1." Fixed by
+  making every preset bundle set its appearance explicitly.
+
+Checked in headless Chromium: each preset selected via the real dropdown
+(not a debug hook) - Stardream #1 unchanged from before this round;
+3D-Printing shows one matte-white face with five 3-peg hub pieces visibly
+seated near its tips, confirmed live (via the page's own loaded module) to
+have five real ~0.06-radius through-holes with distinct centers, not just
+a texture; Star Odyssey's connectors alone (stars hidden) read as a
+striking 20-vortex wireframe ball, each cluster a clean 3-way spiral
+funnel. A 5-hop round-trip through all three presets produced zero
+console/page errors and landed back on a fully-correct golden/hex/lamp-on
+Stardream #1.
+
+**Known limitations, for a future round:** the flyover camera path still
+assumes the original horn-arc connector shape - it's disabled entirely in
+single-face mode (nothing to fly around), but in Star Odyssey it still
+flies the old horn-arc-shaped path near vertices whose visible connector is
+now the spiral vortex, a cosmetic mismatch. No STL/3MF export exists yet
+(flagged in the printability assessment this whole branch follows from) -
+the 3D-Printing preset is print-READY geometry, not yet an exportable file.
+
 ## File layout
 
 ```

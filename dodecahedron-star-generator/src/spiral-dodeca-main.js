@@ -17,8 +17,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
-import { buildDodecahedron, computeAdjacentFaceConnections } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornArcPointAt } from './spiralarm.js';
+import { buildDodecahedron, computeAdjacentFaceConnections, computeThreeCycles } from './geometry.js';
+import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornArcPointAt, buildSnapHubGroup, buildSpiralVortexGroup } from './spiralarm.js';
 import { createPerforationTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -164,6 +164,11 @@ const faces = buildDodecahedron(RADIUS);
 // The same rule + 60 pairs the original 5-thin-arm sculpture uses, derived
 // from the user's reference connection sequences (see geometry.js).
 const connections = computeAdjacentFaceConnections(faces);
+// The 60 pairs' 20 closed 3-cycles (one per dodecahedron vertex) - needed
+// by anything that has to see all THREE tips of a "circular horn triangle"
+// at once (the snap-joint hub piece, the Star Odyssey spiral connector),
+// unlike `buildHornArc` which only ever looks at one pair at a time.
+const threeCycles = computeThreeCycles(connections);
 
 const params = {
   // Star shape - user's preferred settings from the live panel.
@@ -225,6 +230,115 @@ const params = {
   // so the first view of it reads as a leisurely tour, not a blur.
   flyoverMode: false,
   flyoverSpeed: 0.33,
+
+  // --- Presets (see PRESETS below) ---
+  // `preset` just tracks which dropdown entry is selected; the params it
+  // actually drives are the ones below plus whatever shape/appearance
+  // values the preset bundle overrides on top of this base object.
+  preset: 'stardream1',
+  // Single-face mode ("Stardream - 3D Printing"): render only
+  // `faces[singleFaceIndex]`'s star (full mesh + rim), skipping the other
+  // 11 - the preset's whole point is a detailed, print-oriented look at
+  // ONE face, not the assembled sculpture.
+  singleFaceMode: false,
+  singleFaceIndex: 0,
+  // Which connector geometry `rebuild()` builds: the original tip-to-tip
+  // horn arc (Stardream #1), a peg+socket snap-joint hub piece at each
+  // vertex touching the isolated face (3D Printing), or the Star Odyssey
+  // spiral-to-center vortex (all 20 vertices).
+  connectorStyle: 'hornArc',
+  // Snap-joint sockets: a REAL through-hole cut into each arm tip (not the
+  // alphaMap-texture perforation), sized for a peg pushed through the thin
+  // printed sheet - see buildSolidStar2D's field-subtraction comment.
+  snapEnabled: false,
+  snapHoleRadiusFrac: 0.05,
+  snapHoleInsetFrac: 0.11,
+  // The separate small hub piece (peg + socket, corner-hub topology the
+  // user chose): a rounded body at each triangle's center with 3 pegs
+  // reaching toward the sockets above.
+  hubBodyRadiusFrac: 0.07,
+  snapPegRadiusFrac: 0.045,
+  snapPegLengthFrac: 0.16,
+  // Star Odyssey spiral-vortex connector shape.
+  spiralTurns: 0.65,
+  spiralSweepFrac: 0.4,
+  spiralArcWidthFrac: 0.035,
+};
+
+// Three named parameter bundles, applied wholesale via setParams() from the
+// preset dropdown. Each is a PARTIAL object - only the keys that differ
+// from whatever's currently set - so switching presets can't leave stray
+// values from a previous preset lying around unless it means to (e.g. going
+// from 3D-Printing back to Stardream #1 explicitly turns singleFaceMode
+// back off rather than just not mentioning it).
+const PRESETS = {
+  // The original sculpture, unchanged - every value here matches `params`
+  // above exactly, so selecting this after fiddling with sliders resets
+  // the whole shape back to the tuned default.
+  stardream1: {
+    starRotationDeg: 29, tipScale: 1.28, turns: 0.1, hubRadiusFrac: 0.24,
+    bandHalfWidth: 0.23, tipWidthFrac: 0.12, widthTaperPower: 0.9,
+    thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
+    tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
+    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
+    showExtensions: true, extLengthFactor: 0.55, extDepthFraction: 0.95,
+    extArcWidthFrac: 0.04, extClothoid: 1,
+    showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
+    fieldGrid: 144,
+    singleFaceMode: false, connectorStyle: 'hornArc', snapEnabled: false,
+    // Every preset bundle sets its own appearance explicitly (not just
+    // shape/mode params) - otherwise switching presets only ever changes
+    // whatever keys THIS bundle happens to mention, leaving a previous
+    // preset's material/pattern/lamp-mode stuck in place instead of each
+    // preset being a complete, self-consistent look.
+    material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
+    lampMode: true, lampIntensity: 19,
+  },
+  // Focused on ONE detailed, printable face instead of the assembled
+  // sculpture. Tip width/thickness are pulled way up from the display
+  // defaults (0.12/0.17 -> 0.4/0.6) specifically so there's enough real
+  // material at the tip to cut a snap-hole socket through and still print
+  // a solid wall around it - see the printability assessment this
+  // followed up on: at the DISPLAY defaults, even at a generous 250mm
+  // print, the tip wall thickness measured under 0.15mm, well below a
+  // single 0.4mm nozzle line. `fieldGrid`/`subdivisions` are bumped up too,
+  // affordable now that only one face is being built instead of twelve.
+  print3d: {
+    starRotationDeg: 29, tipScale: 1.28, turns: 0.1, hubRadiusFrac: 0.24,
+    bandHalfWidth: 0.26, tipWidthFrac: 0.4, widthTaperPower: 0.9,
+    thickness: 0.03, tipThicknessFrac: 0.6, bulgeStrength: 0.16,
+    tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
+    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
+    showExtensions: false, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
+    // Only one face gets built in this mode, so a bit more resolution than
+    // the display default (144) is affordable - mostly so the snap-hole
+    // socket reads as a reasonably round circle rather than a coarse
+    // octagon (fieldGrid's cell size sets how many marching-squares samples
+    // fall across the hole's own small radius).
+    fieldGrid: 180,
+    singleFaceMode: true, singleFaceIndex: 0,
+    connectorStyle: 'snapHub', snapEnabled: true,
+    snapHoleRadiusFrac: 0.05, snapHoleInsetFrac: 0.11,
+    hubBodyRadiusFrac: 0.07, snapPegRadiusFrac: 0.045, snapPegLengthFrac: 0.16,
+    material: 'matteWhite', pattern: 'none', lampMode: false,
+  },
+  // Same star/arm geometry as Stardream #1 - the brief was to change how
+  // the CONNECTIONS work, not the stars - but every horn-arc tip-to-tip
+  // bow is replaced by a 3-way spiral vortex converging at that vertex's
+  // "circular horn triangle" center.
+  starOdyssey: {
+    starRotationDeg: 29, tipScale: 1.28, turns: 0.1, hubRadiusFrac: 0.24,
+    bandHalfWidth: 0.23, tipWidthFrac: 0.12, widthTaperPower: 0.9,
+    thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
+    tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
+    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
+    showExtensions: false, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
+    fieldGrid: 144,
+    singleFaceMode: false, connectorStyle: 'spiralVortex', snapEnabled: false,
+    spiralTurns: 0.65, spiralSweepFrac: 0.4, spiralArcWidthFrac: 0.035,
+    material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
+    lampMode: true, lampIntensity: 19,
+  },
 };
 
 let starGroup = null;
@@ -561,45 +675,85 @@ function rebuild() {
   const tipsByLabel = new Map();
 
   for (const face of faces) {
-    const { geometry, arms } = mapSolidStarToFace(star2D, face, params);
-    const starMesh = new THREE.Mesh(geometry, sculptureMaterial);
-    starMesh.userData.faceIndex = face.index;
-    starGroup.add(starMesh);
+    const isShown = !params.singleFaceMode || face.index === params.singleFaceIndex;
+    if (isShown) {
+      const { geometry, arms } = mapSolidStarToFace(star2D, face, params);
+      const starMesh = new THREE.Mesh(geometry, sculptureMaterial);
+      starMesh.userData.faceIndex = face.index;
+      starGroup.add(starMesh);
 
-    if (params.showRim) {
-      const rimGeom = buildStarRim(star2D, face, params);
-      const rimMesh = new THREE.Mesh(rimGeom, rimMaterial);
-      rimMesh.userData.faceIndex = face.index;
-      rimGroup.add(rimMesh);
-    }
+      if (params.showRim) {
+        const rimGeom = buildStarRim(star2D, face, params);
+        const rimMesh = new THREE.Mesh(rimGeom, rimMaterial);
+        rimMesh.userData.faceIndex = face.index;
+        rimGroup.add(rimMesh);
+      }
 
-    for (const arm of arms) {
-      tipsByLabel.set(`F${face.index}-A${arm.armIndex}`, arm);
+      for (const arm of arms) tipsByLabel.set(`F${face.index}-A${arm.armIndex}`, arm);
+    } else {
+      // Single-face mode: this face's own mesh/rim aren't rendered, but its
+      // tip positions/tangents are still needed - other faces' snap-hub
+      // pieces (or, outside single-face mode, the horn-arc/spiral
+      // connectors) reference tips across face boundaries. `computeArmTips`
+      // gets just that, skipping the full top/bottom-sheet + wall vertex
+      // build this face doesn't need.
+      for (const arm of computeArmTips(star2D, face, params)) {
+        tipsByLabel.set(`F${face.index}-A${arm.armIndex}`, arm);
+      }
     }
   }
 
   const R = faces[0].R_out;
-
   let missing = 0;
-  if (params.showExtensions) {
-    for (const { a, b } of connections) {
-      const tipA = tipsByLabel.get(a);
-      const tipB = tipsByLabel.get(b);
-      if (!tipA || !tipB) {
-        missing++;
-        continue;
+  let connectorCount = 0;
+
+  if (params.connectorStyle === 'hornArc') {
+    if (params.showExtensions) {
+      for (const { a, b } of connections) {
+        const tipA = tipsByLabel.get(a);
+        const tipB = tipsByLabel.get(b);
+        if (!tipA || !tipB) {
+          missing++;
+          continue;
+        }
+        // Sized off the rim, drawn with the rim's (never-perforated)
+        // material: the horn triangles read as the rim bead continuing off
+        // the arm tips across the gaps, not as separate structural ribbon.
+        const { geometry } = buildHornArc(tipA, tipB, {
+          arcWidth: R * params.extArcWidthFrac,
+          arcHeight: R * Math.max(params.rimProudFrac, 0.005) * 2,
+          lengthFactor: params.extLengthFactor,
+          depthFraction: params.extDepthFraction,
+          clothoidFactor: params.extClothoid,
+        });
+        extGroup.add(new THREE.Mesh(geometry, rimMaterial));
+        connectorCount++;
       }
-      // Sized off the rim, drawn with the rim's (never-perforated)
-      // material: the horn triangles read as the rim bead continuing off
-      // the arm tips across the gaps, not as separate structural ribbon.
-      const { geometry } = buildHornArc(tipA, tipB, {
-        arcWidth: R * params.extArcWidthFrac,
-        arcHeight: R * Math.max(params.rimProudFrac, 0.005) * 2,
-        lengthFactor: params.extLengthFactor,
-        depthFraction: params.extDepthFraction,
-        clothoidFactor: params.extClothoid,
-      });
-      extGroup.add(new THREE.Mesh(geometry, rimMaterial));
+    }
+  } else if (params.connectorStyle === 'snapHub') {
+    // 3D-printing preset: only the vertices touching the isolated face get
+    // a hub piece built - the other faces around those vertices aren't
+    // rendered anyway, so there's nothing to illustrate for the rest.
+    const facePrefix = `F${params.singleFaceIndex}-`;
+    for (const triple of threeCycles) {
+      if (!triple.some((label) => label.startsWith(facePrefix))) continue;
+      const tips = triple.map((label) => tipsByLabel.get(label));
+      if (tips.some((t) => !t)) { missing++; continue; }
+      const hubGroup = buildSnapHubGroup(tips[0], tips[1], tips[2], { R, ...params });
+      hubGroup.children.forEach((m) => { m.material = rimMaterial; });
+      extGroup.add(hubGroup);
+      connectorCount++;
+    }
+  } else if (params.connectorStyle === 'spiralVortex') {
+    // Star Odyssey: every vertex gets a 3-way spiral instead of the three
+    // horn-arc pairs that would otherwise connect it.
+    for (const triple of threeCycles) {
+      const tips = triple.map((label) => tipsByLabel.get(label));
+      if (tips.some((t) => !t)) { missing++; continue; }
+      const vortexGroup = buildSpiralVortexGroup(tips[0], tips[1], tips[2], { R, ...params });
+      vortexGroup.children.forEach((m) => { m.material = rimMaterial; });
+      extGroup.add(vortexGroup);
+      connectorCount++;
     }
   }
 
@@ -610,14 +764,21 @@ function rebuild() {
 
   document.getElementById('metrics').innerHTML =
     `Faces: ${faces.length} | Tips: ${tipsByLabel.size}/60<br>` +
-    `Extensions: ${params.showExtensions ? `${connections.length - missing}${missing ? ` (${missing} missing!)` : ''}` : 'off'}`;
+    `Connectors (${params.connectorStyle}): ${connectorCount}${missing ? ` (${missing} missing!)` : ''}`;
 
   const listEl = document.getElementById('conn-list');
   if (listEl) {
     listEl.textContent = connections.map(({ a, b }) => `${a} -> ${b}`).join('\n');
   }
 
-  ({ curve: flyoverCurve, lookOffsets: flyoverLookOffsets, normals: flyoverNormals, speedMultipliers: flyoverSpeedMultipliers } = buildFlyoverPath(star2D, faces, tipsByLabel, connections, params));
+  // The flyover path assumes the full 12-face assembled sculpture with
+  // every tip/horn-arc present - meaningless (and error-prone) in
+  // single-face mode, where most of that geometry is deliberately absent.
+  if (!params.singleFaceMode) {
+    ({ curve: flyoverCurve, lookOffsets: flyoverLookOffsets, normals: flyoverNormals, speedMultipliers: flyoverSpeedMultipliers } = buildFlyoverPath(star2D, faces, tipsByLabel, connections, params));
+  } else {
+    flyoverCurve = null;
+  }
 }
 
 function bindSlider(id, key, opts = {}) {
@@ -712,6 +873,26 @@ document.getElementById('flyoverSpeed').addEventListener('input', (e) => {
 });
 document.getElementById('panel-toggle').addEventListener('click', () => {
   document.getElementById('panel').classList.toggle('collapsed');
+});
+
+const PRESET_HINTS = {
+  stardream1: 'Original assembled sculpture, 20 tip-to-tip horn-triangle arcs.',
+  print3d: 'One detailed face at a time, sized for a real print - peg + socket friction-fit joints (small hub piece per vertex) instead of the fused horn arc. Pick which face with the slider below.',
+  starOdyssey: "Same stars as #1, but every horn-triangle arc is replaced by a 3-way spiral funnel converging at that vertex's center.",
+};
+document.getElementById('preset').addEventListener('change', (e) => {
+  const name = e.target.value;
+  window.__spiralDodeca.applyPreset(name);
+  document.getElementById('preset-hint').textContent = PRESET_HINTS[name] || '';
+  document.getElementById('singleFaceRow').style.display = params.singleFaceMode ? 'block' : 'none';
+});
+document.getElementById('singleFaceIndex').addEventListener('input', (e) => {
+  const v = parseInt(e.target.value, 10);
+  params.singleFaceIndex = v;
+  document.getElementById('v-singleFaceIndex').textContent = v;
+  rebuild();
+  applyHiddenFaces();
+  if (params.singleFaceMode) focusOnFace(v);
 });
 
 // Click-to-hide faces (debug): raycast against the star sheets, toggling
@@ -816,6 +997,27 @@ let flyoverTiltOffset = 0;
 // the moment Space paused it - so pausing/resuming never loses the
 // user's chosen speed the way just remembering a hardcoded default would.
 let flyoverSpeedBeforePause = null;
+// Single-face mode ("Stardream - 3D Printing"): point the default
+// (non-flyover) camera at the one face being shown instead of leaving it
+// wherever OrbitControls last had it aimed at the full assembled sculpture
+// - otherwise turning the preset on can easily land the isolated face
+// mostly or entirely out of frame. Framed from outside along the face's
+// own normal, at a distance scaled to the face's own R_out rather than a
+// fixed number, so it frames sensibly regardless of tipScale/bandHalfWidth.
+function focusOnFace(faceIndex) {
+  const face = faces[faceIndex];
+  const dist = face.R_out * 3.2;
+  camera.position.copy(face.center).addScaledVector(face.normal, dist).addScaledVector(face.U, dist * 0.35);
+  camera.up.copy(face.normal);
+  controls.target.copy(face.center);
+  controls.update();
+}
+function resetDefaultView() {
+  camera.position.copy(DEFAULT_CAMERA_POS);
+  camera.up.set(0, 1, 0);
+  controls.target.set(0, 0, 0);
+  controls.update();
+}
 function setFlyoverMode(on) {
   params.flyoverMode = on;
   controls.enabled = !on;
@@ -824,10 +1026,7 @@ function setFlyoverMode(on) {
     flyoverLastMs = null; // no dt on the first frame after (re)enabling
     flyoverSpeedBeforePause = null;
   } else {
-    camera.position.copy(DEFAULT_CAMERA_POS);
-    camera.up.set(0, 1, 0);
-    controls.target.set(0, 0, 0);
-    controls.update();
+    resetDefaultView();
   }
 }
 window.addEventListener('keydown', (e) => {
@@ -923,6 +1122,11 @@ window.__spiralDodeca = {
   setStarsVisible(v) { starGroup.visible = v; },
   setExtensionsVisible(v) { extGroup.visible = v; },
   setParams(partial) {
+    // Entering single-face mode while the flyover (which assumes the full
+    // assembled sculpture) is running would leave the camera flying
+    // through geometry that's no longer there - turn it off first, same
+    // as if the user had unchecked it themselves.
+    if (partial.singleFaceMode && params.flyoverMode) setFlyoverMode(false);
     Object.assign(params, partial);
     for (const key of Object.keys(partial)) syncControl(key);
     applyMaterialPreset(params.material);
@@ -931,6 +1135,15 @@ window.__spiralDodeca = {
     applyClipping();
     rebuild();
     if (partial.flyoverMode !== undefined) setFlyoverMode(partial.flyoverMode);
+    if (partial.singleFaceMode !== undefined) {
+      if (partial.singleFaceMode) focusOnFace(params.singleFaceIndex);
+      else resetDefaultView();
+    }
+  },
+  applyPreset(name) {
+    const bundle = PRESETS[name];
+    if (!bundle) return;
+    this.setParams({ ...bundle, preset: name });
   },
 };
 

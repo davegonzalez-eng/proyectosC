@@ -365,6 +365,16 @@ export function buildSolidStar2D(params, R) {
     fieldGrid = 144,
     armSamples = 48,
     subdivisions = 3,
+    // Snap-joint sockets ("Stardream - 3D Printing" preset): a real
+    // through-hole cut into each arm tip (not the alphaMap-texture
+    // perforation elsewhere in the app, an actual boundary loop in the
+    // field), sized for a peg pushed through the thin printed sheet.
+    // Placed `snapHoleInsetFrac * R` in from the tip along the arm's own
+    // centerline, not AT the tip point itself, so the hole's full
+    // circumference lands in solid material instead of notching the tip.
+    snapEnabled = false,
+    snapHoleRadiusFrac = 0.05,
+    snapHoleInsetFrac = 0.11,
   } = params;
 
   const rot = THREE.MathUtils.degToRad(starRotationDeg);
@@ -400,6 +410,36 @@ export function buildSolidStar2D(params, R) {
     tips2D.push({ tip: pts[0], prev: pts[1], prev2: pts[2] });
   }
 
+  // Snap-hole center: walk the arm's own centerline (arc length, same
+  // `cum` measure the width taper uses) out from the tip until it first
+  // clears `snapHoleInsetFrac * R`, then linearly interpolate the exact
+  // point on that segment - keeps the hole ON the centerline (so it's
+  // centered in the tip's width) rather than at a fixed sample index,
+  // which would drift with `armSamples`.
+  const snapHoleCenters2D = [];
+  if (snapEnabled) {
+    const holeR = R * snapHoleRadiusFrac;
+    const inset = R * snapHoleInsetFrac;
+    for (const { pts } of armsData) {
+      const cum = [0];
+      for (let i = 1; i < pts.length; i++) {
+        cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+      }
+      let center = pts[pts.length - 1];
+      for (let i = 1; i < pts.length; i++) {
+        if (cum[i] >= inset) {
+          const segFrac = (inset - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+          center = {
+            x: pts[i - 1].x + (pts[i].x - pts[i - 1].x) * segFrac,
+            y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * segFrac,
+          };
+          break;
+        }
+      }
+      snapHoleCenters2D.push({ ...center, radius: holeR });
+    }
+  }
+
   const armDist = (arm, px, py) => {
     let d = Infinity;
     const { pts, halfW } = arm;
@@ -420,7 +460,14 @@ export function buildSolidStar2D(params, R) {
   const field = (px, py) => {
     let d = armDist(armsData[0], px, py);
     for (let k = 1; k < armsData.length; k++) d = smin(d, armDist(armsData[k], px, py), fillet);
-    return smin(d, Math.hypot(px, py) - capR, fillet);
+    d = smin(d, Math.hypot(px, py) - capR, fillet);
+    // Subtract each snap hole (standard SDF subtraction: max(d, -hole(p))) -
+    // a plain max, not smin, so the hole's edge stays a crisp circle for a
+    // peg to seat against rather than blending into the surrounding taper.
+    for (const h of snapHoleCenters2D) {
+      d = Math.max(d, h.radius - Math.hypot(px - h.x, py - h.y));
+    }
+    return d;
   };
 
   // Sample the field on a grid covering the star's maximum possible extent.
@@ -613,7 +660,7 @@ export function buildSolidStar2D(params, R) {
   // pipeline the rendered sheet uses (see mapArmCenterline below).
   const armPolylines2D = armsData.map((a) => a.pts);
 
-  return { positions, indices, boundaryNext, tips2D, armPolylines2D, R };
+  return { positions, indices, boundaryNext, tips2D, armPolylines2D, snapHoleCenters2D, R };
 }
 
 /**
@@ -801,7 +848,23 @@ export function mapSolidStarToFace(star2D, face, params = {}) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
-  const arms = star2D.tips2D.map(({ tip, prev, prev2 }, armIndex) => {
+  const arms = computeArmTips(star2D, face, params);
+
+  return { geometry, arms };
+}
+
+/**
+ * Just the per-arm tip position/tangent/curvature `mapSolidStarToFace`
+ * returns alongside its geometry - factored out so callers that only need
+ * tip data (single-face print mode's hidden faces, which still need their
+ * tips for the snap-hub pieces and connectors but not their full mesh) can
+ * skip the expensive top/bottom-sheet + wall vertex construction entirely.
+ * @returns {{armIndex: number, tipPosition: THREE.Vector3, tipTangent: THREE.Vector3, tipCurvature: THREE.Vector3}[]}
+ */
+export function computeArmTips(star2D, face, params = {}) {
+  const R = star2D.R;
+  const place = (u, w) => mapStarPoint(u, w, R, face, params);
+  return star2D.tips2D.map(({ tip, prev, prev2 }, armIndex) => {
     const p0 = place(tip.x, tip.y);
     const p1 = place(prev.x, prev.y);
     const p2 = place(prev2.x, prev2.y);
@@ -825,8 +888,6 @@ export function mapSolidStarToFace(star2D, face, params = {}) {
     }
     return { armIndex, tipPosition: p0, tipTangent: tangent, tipCurvature };
   });
-
-  return { geometry, arms };
 }
 
 /**
@@ -1049,6 +1110,183 @@ export function hornArcPointAt(tipA, tipB, options = {}) {
     if (len > 1e-9) p.multiplyScalar(target / len);
     return p;
   };
+}
+
+/**
+ * The point three arm tips converge on for both the snap-joint hub piece
+ * and the Star Odyssey spiral connector - "the center of the current
+ * circular horn triangle": simply the centroid of the three tips' world
+ * positions. `buildHornArc`'s own arc never needed this (it only ever
+ * looks at one pair at a time), so it's computed fresh here from all
+ * three at once.
+ * @returns {THREE.Vector3}
+ */
+export function hornTriangleCenter(tipA, tipB, tipC) {
+  return tipA.tipPosition.clone()
+    .add(tipB.tipPosition)
+    .add(tipC.tipPosition)
+    .multiplyScalar(1 / 3);
+}
+
+function cylinderBetween(start, direction, length, radius, segments = 16) {
+  const geom = new THREE.CylinderGeometry(radius, radius, length, segments, 1, false);
+  geom.translate(0, length / 2, 0); // base at local origin, extends along +Y
+  const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+  geom.applyQuaternion(quat);
+  geom.translate(start.x, start.y, start.z);
+  return geom;
+}
+
+/**
+ * Snap-joint hub piece ("Stardream - 3D Printing" preset, peg + socket
+ * friction fit, user-chosen "small separate corner hub" topology): one
+ * small printed part per dodecahedron vertex - a rounded body at
+ * `hornTriangleCenter`, with three pegs reaching out toward each of the
+ * three meeting tips' own snap-hole sockets. Each peg is sized a touch
+ * smaller than the socket radius (`params.snapPegRadiusFrac` vs. the star
+ * sheet's own `snapHoleRadiusFrac`) for a friction fit, and driven deep
+ * into the body (not just touching its surface) so the two overlap
+ * solidly - overlapping solid primitives print fine without true CSG
+ * union, which this deliberately leans on instead of attempting a real
+ * boolean merge.
+ * @returns {THREE.Group}
+ */
+export function buildSnapHubGroup(tipA, tipB, tipC, params = {}) {
+  const {
+    R = 1,
+    hubBodyRadiusFrac = 0.07,
+    snapPegRadiusFrac = 0.045,
+    snapPegLengthFrac = 0.16,
+  } = params;
+
+  const center = hornTriangleCenter(tipA, tipB, tipC);
+  const group = new THREE.Group();
+
+  const bodyGeom = new THREE.SphereGeometry(R * hubBodyRadiusFrac, 20, 16);
+  bodyGeom.translate(center.x, center.y, center.z);
+  group.add(new THREE.Mesh(bodyGeom));
+
+  const pegRadius = R * snapPegRadiusFrac;
+  const pegLength = R * snapPegLengthFrac;
+  for (const tip of [tipA, tipB, tipC]) {
+    const direction = tip.tipPosition.clone().sub(center).normalize();
+    const pegGeom = cylinderBetween(center, direction, pegLength, pegRadius);
+    group.add(new THREE.Mesh(pegGeom));
+  }
+  return group;
+}
+
+/**
+ * Star Odyssey's replacement for the horn arc: instead of one side of the
+ * triangle bowing tip-to-tip around the OUTSIDE, each of the three tips
+ * spirals INWARD, converging at `hornTriangleCenter` - a small three-armed
+ * vortex/funnel instead of a curved triangle. A simple conical (not
+ * logarithmic) spiral: sweep radius shrinks LINEARLY to a small nub while
+ * the angle keeps advancing at a constant rate, avoiding the log/exp
+ * singularities a true logarithmic spiral has at r -> 0. The initial
+ * sweep direction is the tip's own outward tangent (projected perpendicular
+ * to the tip->center axis) so the connector at least LEAVES the tip
+ * continuing the arm's own lean, even though exact curvature/tangent
+ * matching (like the horn arc's clothoid fit) isn't attempted here - there
+ * are three shared endpoints converging on one point with no single
+ * natural tangent to match there, unlike the paired horn arc.
+ * @returns {(t: number) => THREE.Vector3} t in [0,1], tip at 0, center at 1
+ */
+export function spiralVortexPointAt(tip, center, options = {}) {
+  const { turns = 0.65, sweepFrac = 0.4 } = options;
+  const P = tip.tipPosition.clone();
+  const axis = center.clone().sub(P);
+  const axisLen = axis.length();
+  if (axisLen > 1e-9) axis.normalize(); else axis.set(0, 0, 1);
+
+  let e1 = tip.tipTangent.clone().addScaledVector(axis, -tip.tipTangent.dot(axis));
+  if (e1.lengthSq() < 1e-8) {
+    e1 = Math.abs(axis.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    e1.addScaledVector(axis, -e1.dot(axis));
+  }
+  e1.normalize();
+  const e2 = new THREE.Vector3().crossVectors(axis, e1).normalize();
+
+  const thetaMax = turns * Math.PI * 2;
+  const r0 = axisLen * sweepFrac;
+  return (t) => {
+    const theta = thetaMax * t;
+    const radius = r0 * (1 - t);
+    return P.clone()
+      .addScaledVector(axis, axisLen * t)
+      .addScaledVector(e1, radius * Math.cos(theta))
+      .addScaledVector(e2, radius * Math.sin(theta));
+  };
+}
+
+/**
+ * Extrudes one tip's spiral-vortex arm into a solid tapering tube (circular
+ * cross-section, shrinking from the arm's own tip radius down to a small
+ * nub at the shared center) - the Star Odyssey equivalent of one side of
+ * `buildHornArc`'s bead, for a single tip.
+ */
+function buildSpiralVortexArm(tip, center, options = {}) {
+  const {
+    segments = 40,
+    radialSegments = 10,
+    startRadius = 0.04,
+    endRadiusFrac = 0.25,
+  } = options;
+  const pointAt = spiralVortexPointAt(tip, center, options);
+  const endRadius = startRadius * endRadiusFrac;
+
+  const positions = [];
+  const indices = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const p = pointAt(t);
+    const tangent = pointAt(Math.min(t + 1e-3, 1)).sub(pointAt(Math.max(t - 1e-3, 0))).normalize();
+    let ortho = Math.abs(tangent.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const major = new THREE.Vector3().crossVectors(tangent, ortho).normalize();
+    const minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
+    const radius = THREE.MathUtils.lerp(startRadius, endRadius, t);
+    for (let k = 0; k <= radialSegments; k++) {
+      const phi = (k / radialSegments) * Math.PI * 2;
+      const v = p.clone()
+        .addScaledVector(major, radius * Math.cos(phi))
+        .addScaledVector(minor, radius * Math.sin(phi));
+      positions.push(v.x, v.y, v.z);
+    }
+  }
+  const ring = radialSegments + 1;
+  for (let i = 0; i < segments; i++) {
+    for (let k = 0; k < radialSegments; k++) {
+      const s0 = i * ring + k, s1 = s0 + 1, s2 = s0 + ring, s3 = s2 + 1;
+      indices.push(s0, s2, s1, s1, s2, s3);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * All three tips' spiral-vortex arms for one dodecahedron vertex, as a
+ * single Group - the Star Odyssey replacement for the three `buildHornArc`
+ * beads that would otherwise connect this triangle's three pairs.
+ * @returns {THREE.Group}
+ */
+export function buildSpiralVortexGroup(tipA, tipB, tipC, params = {}) {
+  const { R = 1, spiralTurns = 0.65, spiralSweepFrac = 0.4, spiralArcWidthFrac = 0.035 } = params;
+  const center = hornTriangleCenter(tipA, tipB, tipC);
+  const group = new THREE.Group();
+  const startRadius = R * spiralArcWidthFrac;
+  for (const tip of [tipA, tipB, tipC]) {
+    const geom = buildSpiralVortexArm(tip, center, {
+      turns: spiralTurns,
+      sweepFrac: spiralSweepFrac,
+      startRadius,
+    });
+    group.add(new THREE.Mesh(geom));
+  }
+  return group;
 }
 
 export function buildHornArc(tipA, tipB, options = {}) {

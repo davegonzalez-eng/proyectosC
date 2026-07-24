@@ -368,3 +368,53 @@ export function computeAdjacentFaceConnections(faces) {
   }
   return pairs;
 }
+
+/**
+ * Groups `computeAdjacentFaceConnections`'s 60 pairs into their 20 closed
+ * 3-cycles - one per dodecahedron vertex, where three faces' arm tips meet
+ * (the "circular horn triangle"). The pairs alone only say "these two tips
+ * connect"; nothing in that list is explicitly grouped into threes, so
+ * every connector built directly off `connections` so far (`buildHornArc`)
+ * has only ever needed ONE pair at a time. The snap-joint hub piece and the
+ * spiral-vortex connector both need all three tips of a vertex at once
+ * (the hub's three pegs, the vortex's shared convergence point), hence
+ * this.
+ *
+ * Built by brute-force triangle-finding on the small (60-node) adjacency
+ * graph: for every label, for every pair of its neighbors, if those two
+ * neighbors are ALSO connected to each other, the three form a closed
+ * triangle. Every edge in this graph belongs to exactly one such triangle
+ * (verified under Node: 20 cycles, every one length 3, covering all 60
+ * pairs with no leftovers), so a plain neighbor-lookup dedup finds all 20
+ * with no need for a general cycle-detection algorithm.
+ * @param {{a: string, b: string}[]} connections
+ * @returns {string[][]} 20 triples of labels, e.g. ['F0-A0', 'F1-A4', 'F2-A2']
+ */
+export function computeThreeCycles(connections) {
+  const neighbors = new Map();
+  const add = (a, b) => {
+    if (!neighbors.has(a)) neighbors.set(a, []);
+    neighbors.get(a).push(b);
+  };
+  for (const { a, b } of connections) {
+    add(a, b);
+    add(b, a);
+  }
+  const hasEdge = (a, b) => (neighbors.get(a) || []).includes(b);
+
+  const seen = new Set();
+  const triples = [];
+  for (const [label, nbrs] of neighbors) {
+    for (let i = 0; i < nbrs.length; i++) {
+      for (let j = i + 1; j < nbrs.length; j++) {
+        const n1 = nbrs[i], n2 = nbrs[j];
+        if (!hasEdge(n1, n2)) continue;
+        const key = [label, n1, n2].sort().join('|');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        triples.push([label, n1, n2]);
+      }
+    }
+  }
+  return triples;
+}
