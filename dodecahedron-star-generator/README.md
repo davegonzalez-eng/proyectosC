@@ -1374,6 +1374,81 @@ artifact. Space-to-pause verified directly: pressing it once from a
 running 0.33 zeroes `params.flyoverSpeed` and the slider; pressing it
 again restores exactly 0.33.
 
+## 24. Baked-in defaults from the user's own tuning; an orbit flourish after each horn-arc crossing; spatially-varying speed
+
+Follow-up on §23: "still crossing the surface and showing underneath. this
+might be a valuable hint. if i reduce the thickness to 0.01 and do 4
+up_arrows, it works well for most of the current trajectory. so let's have
+that as the default for the trajectory." Plus two new asks: an "orbit
+flourish" right after each horn-triangle crossing, and speed that varies
+with what's happening along the path.
+
+**New defaults.** `thickness` 0.015 -> 0.01 (slider default/label to match).
+`FLYOVER_DOWNWARD_TILT_FRAC` goes from `0.1` to `0.1 - 4*0.03 = -0.02` -
+exactly what four Arrow-Up presses (`FLYOVER_TILT_STEP = 0.03` each) would
+have subtracted from the old baseline, so the zero-offset view now IS the
+user's found-good tilt.
+
+**Orbit flourish.** Right after a horn-arc lands on a neighboring star's
+tip (end of step (c) in `buildFlyoverPath`), a new step (d) pulls the
+camera up and out, sweeps 4/5 of a full turn (288 degrees) around that
+face at a wider radius/height while gazing at the face center, then spends
+the remaining 1/5 of the turn descending - both position and angle -
+back down to the exact hover point/normal the next hop's arm traversal
+starts from, so the loop stays seamless. Two false starts on the way to
+this:
+
+- First pass sized the zoom-out radius/height directly off `R_out`
+  (`*1.6` / `*0.9`). Numerically clean (no NaNs) but visually the camera
+  ended up floating outside the *entire* dodecahedron's silhouette -
+  confirmed by dropping a debug marker at the computed position and
+  screenshotting from the default overview camera, which showed it hanging
+  in empty space well past the sculpture's edge. Root cause: faces sit
+  close together around a fairly compact sculpture, so lifting a whole
+  `R_out` along the face normal is enough clearance to clear the *entire*
+  object, not just orbit above one star. Fixed by shrinking to `R_out*1.15`
+  radius / `R_out*0.35` height - just past the star's own tips, not past
+  the whole sculpture.
+- Even after that, first-person screenshots *from* the flourish camera
+  were still solid black. The marker was on the object, but the gaze
+  wasn't: the orbit reused the same "look at the curve's own next point,
+  plus a couple-percent downward-tilt bias" scheme the arm/arc segments
+  use, which works for nose-first surface-hugging flight but can't swing
+  the gaze ~80 degrees down-and-inward the way looking AT a star from a
+  wide orbit needs - measured directly (dot product between camera forward
+  and the direction toward face center) at roughly 0.15, i.e. ~81 degrees
+  off. Fixed by baking a large explicit `lookOffset` (the pre-existing
+  `lookOffsets` parallel array, previously only used for the horn-arc's
+  lateral gaze bias) into every orbit-phase point: the vector from the
+  default lookahead point to the face center, easing in across the
+  zoom-out and back out across the descend so it hands off smoothly to
+  the plain forward-hugging look on both ends.
+
+**Spatially-varying speed.** A new `speedMultipliers` parallel array
+(alongside `points`/`normals`/`lookOffsets`, sampled the same way via a new
+`sampleFlyoverScalar`) scales how fast `flyoverT` advances at each point,
+multiplying `params.flyoverSpeed` rather than replacing it (so pause/
+rewind still work everywhere): arm segments taper down to 0.55x near the
+tip (the thinnest part of the star) and back up to 1x by the hub; horn-arc
+segments run at 0.4x through the "maneuvering around the triangle"
+midsection, ramping up to 1.5x in the last quarter as the arc emerges from
+underneath back onto the next star's main surface; the orbit flourish
+carries that 1.5x pace into its zoom-out, easing back to the normal 1x
+cruising speed as it settles into the wide orbit.
+
+Checked numerically in Node (loading the actual shipped `buildFlyoverPath`
+straight from source via a small `new Function` wrapper, not a hand-typed
+copy, so the check can't drift from what's shipped): 2533 points across
+all 10 hops, zero NaN/Infinity in 6000 arc-length samples, zero invalid
+normals, `speedMultipliers` bounded to [0.4, 1.5]. Checked visually in
+headless Chromium two ways - direct `flyoverT` injection at specific
+points (approach, arm mid, arc mid, zoom-out, three cruise points, descend,
+next-hop handoff) after the orbit fix, all showing well-framed close or
+wide star views with no black/empty frames; and a real-timing run (actual
+checkbox toggle, several seconds of wall-clock flight, no `performance.now`
+patching) with zero console/page errors, confirming the whole thing holds
+up under normal playback, not just at hand-picked sample points.
+
 ## File layout
 
 ```
