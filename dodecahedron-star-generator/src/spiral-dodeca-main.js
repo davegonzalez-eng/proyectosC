@@ -933,8 +933,21 @@ function rebuild() {
           const faceIdx = +triple[i].slice(1, triple[i].indexOf('-'));
           const armIdx = tip.armIndex;
           const trueAxisLen = tip.tipPosition.distanceTo(center);
-          const point = tip.tipPosition.clone().addScaledVector(tip.tipTangent, offsetFrac * trueAxisLen);
-          const trimDist = -offsetFrac * trueAxisLen;
+          // Cut a little short of the connector's own true start (toward the
+          // tip, not all the way to it) instead of exactly at it. The trim
+          // itself is a naive whole-triangle drop with no boundary
+          // re-triangulation, so its edge follows the star's own irregular
+          // hex/marching-squares mesh rather than a clean straight line -
+          // reported as the surface "shattering" right before the
+          // connection. Leaving this small overlap strip of the arm's own
+          // (still-attached, non-jagged-looking) surface behind lets the
+          // ribbon's own cross-section - full width here since its
+          // smoothstep taper hasn't started narrowing yet this close to its
+          // start - sit on top of and hide the ragged cut underneath it.
+          const marginFrac = Math.min(0.06, -offsetFrac * 0.5);
+          const trimFrac = offsetFrac + marginFrac;
+          const point = tip.tipPosition.clone().addScaledVector(tip.tipTangent, trimFrac * trueAxisLen);
+          const trimDist = -trimFrac * trueAxisLen;
           if (!armTrimsByFace.has(faceIdx)) armTrimsByFace.set(faceIdx, [null, null, null, null, null]);
           armTrimsByFace.get(faceIdx)[armIdx] = {
             point,
@@ -957,7 +970,7 @@ function rebuild() {
       starGroup.add(starMesh);
 
       if (params.showRim) {
-        const rimGeom = buildStarRim(star2D, face, params);
+        const rimGeom = buildStarRim(star2D, face, params, armTrims);
         const rimMesh = new THREE.Mesh(rimGeom, rimMaterial);
         rimMesh.userData.faceIndex = face.index;
         rimGroup.add(rimMesh);
@@ -1038,7 +1051,13 @@ function rebuild() {
         const tips = triple.map((label) => tipsByLabel.get(label));
         if (tips.some((t) => !t)) { missing++; continue; }
         const ribbonGroup = buildSpiralVortexRibbonGroup(tips[0], tips[1], tips[2], { R, ...params });
-        ribbonGroup.children.forEach((m) => { m.material = rimMaterial; });
+        // Unlike the other connector styles (which use the plain, pattern-
+        // free `rimMaterial`), the ribbon now carries real UVs (arc-length
+        // x width, in the same physical scale the star sheet's own (u,w)
+        // UVs use) - `sculptureMaterial`'s hex-perforation alphaMap/bumpMap
+        // reads correctly on it, so the connector no longer looks like a
+        // bare, unlit strip stitched onto the star's own dotted texture.
+        ribbonGroup.children.forEach((m) => { m.material = sculptureMaterial; });
         extGroup.add(ribbonGroup);
         connectorCount++;
       }

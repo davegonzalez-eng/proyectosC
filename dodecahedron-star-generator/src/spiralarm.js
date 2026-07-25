@@ -685,6 +685,26 @@ function tipBendRotate(u, w, r, R, params) {
 }
 
 /**
+ * UV coordinate for a rendered star-surface point: the SAME (u, w) after
+ * `tipBendRotate` has already spun it, rather than the raw pre-rotation grid
+ * coordinate `mapSolidStarToFace`/`buildStarRim` used to push as UV. The
+ * rotation grows steeply (`tipBendPower`) only in the last stretch before a
+ * tip, so two points close together in raw (u, w) but at slightly different
+ * radii can end up rotated by noticeably different amounts - pulling them
+ * apart in world space faster than their raw-UV distance implies. Sampling
+ * the texture with the raw coordinate then reads as the hex pattern
+ * shearing/stretching in exactly that last stretch (reported as the surface
+ * near the tips feeling "stretched"). Using the already-rotated coordinate
+ * as the UV instead keeps UV distance and in-plane world distance in step
+ * through the rotation, so the pattern tiles uniformly across it; the dip
+ * and bulge are left alone since neither is a spatially-varying in-plane
+ * rotation and so neither shears the pattern the same way.
+ */
+function bentUV(u, w, R, params) {
+  return tipBendRotate(u, w, Math.hypot(u, w), R, params);
+}
+
+/**
  * The "dip" half of the tip bend: an extra inward pull (toward the sphere
  * center), same steep exponential onset as `tipBendRotate`, layered ON TOP
  * of the existing (much gentler, power-1.6) `applyTipDip`. Together the
@@ -833,6 +853,7 @@ export function mapSolidStarToFace(star2D, face, params = {}, armTrims = null) {
   const eps = R * 1e-3;
   const worldPts = new Array(n2);
   const normals = new Array(n2);
+  const uvPts = new Array(n2);
   for (let i = 0; i < n2; i++) {
     const u = star2D.positions[i * 2], w = star2D.positions[i * 2 + 1];
     worldPts[i] = place(u, w);
@@ -841,6 +862,7 @@ export function mapSolidStarToFace(star2D, face, params = {}, armTrims = null) {
     const n = new THREE.Vector3().crossVectors(pu, pw).normalize();
     if (n.dot(face.normal) < 0) n.negate();
     normals[i] = n;
+    uvPts[i] = bentUV(u, w, R, params);
   }
 
   const positions = [];
@@ -850,7 +872,7 @@ export function mapSolidStarToFace(star2D, face, params = {}, armTrims = null) {
 
   // Top sheet (2D triangulation is CCW seen from +normal side).
   for (let i = 0; i < n2; i++) {
-    pushVert(worldPts[i].clone().addScaledVector(normals[i], halfT), star2D.positions[i * 2], star2D.positions[i * 2 + 1]);
+    pushVert(worldPts[i].clone().addScaledVector(normals[i], halfT), uvPts[i].u, uvPts[i].w);
   }
   for (let t = 0; t < star2D.indices.length; t += 3) {
     indices.push(star2D.indices[t], star2D.indices[t + 1], star2D.indices[t + 2]);
@@ -858,7 +880,7 @@ export function mapSolidStarToFace(star2D, face, params = {}, armTrims = null) {
   // Bottom sheet, reversed winding.
   const botBase = n2;
   for (let i = 0; i < n2; i++) {
-    pushVert(worldPts[i].clone().addScaledVector(normals[i], -halfT), star2D.positions[i * 2], star2D.positions[i * 2 + 1]);
+    pushVert(worldPts[i].clone().addScaledVector(normals[i], -halfT), uvPts[i].u, uvPts[i].w);
   }
   for (let t = 0; t < star2D.indices.length; t += 3) {
     indices.push(botBase + star2D.indices[t], botBase + star2D.indices[t + 2], botBase + star2D.indices[t + 1]);
@@ -978,9 +1000,15 @@ export function computeArmTips(star2D, face, params = {}) {
  * @param {number} [params.rimWidthFrac=0.02] rim width, fraction of R_out
  * @param {number} [params.rimProudFrac=0.025] how far the rim's peak stands proud of the sheet, fraction of R_out
  * @param {number} [params.rimCrossSamples=4] cross-section resolution
+ * @param {Array<{point: THREE.Vector3, normal: THREE.Vector3, gateCenter: THREE.Vector3, gateRadius: number}|null>} [armTrims]
+ *   Same per-arm cut planes `mapSolidStarToFace` takes - the rim traces
+ *   every boundary loop independently of the main sheet, so trimming the
+ *   sheet alone left the rim's own bead still running out to the untouched
+ *   true tip: a thin ring/arc floating past the now-shorter sheet with
+ *   nothing behind it (reported as "a circular arm left of the ear lobe").
  * @returns {THREE.BufferGeometry}
  */
-export function buildStarRim(star2D, face, params = {}) {
+export function buildStarRim(star2D, face, params = {}, armTrims = null) {
   const {
     thickness = 0.015,
     rimWidthFrac = 0.02,
@@ -1072,22 +1100,30 @@ export function buildStarRim(star2D, face, params = {}) {
   for (const [a, b] of star2D.boundaryNext) {
     const csA = crossSection(a);
     const csB = crossSection(b);
-    const ua = pos2[a * 2], wa = pos2[a * 2 + 1];
-    const ub = pos2[b * 2], wb = pos2[b * 2 + 1];
+    const uvA = bentUV(pos2[a * 2], pos2[a * 2 + 1], R, params);
+    const uvB = bentUV(pos2[b * 2], pos2[b * 2 + 1], R, params);
     for (let k = 0; k < rimCrossSamples; k++) {
       const base = positions.length / 3;
-      pushVert(csA[k], ua, wa);
-      pushVert(csA[k + 1], ua, wa);
-      pushVert(csB[k], ub, wb);
-      pushVert(csB[k + 1], ub, wb);
+      pushVert(csA[k], uvA.u, uvA.w);
+      pushVert(csA[k + 1], uvA.u, uvA.w);
+      pushVert(csB[k], uvB.u, uvB.w);
+      pushVert(csB[k + 1], uvB.u, uvB.w);
       indices.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
+    }
+  }
+
+  let finalIndices = indices;
+  if (armTrims) {
+    for (const trim of armTrims) {
+      if (!trim) continue;
+      finalIndices = trimTrianglesPastPlane(positions, finalIndices, trim.point, trim.normal, trim.gateCenter, trim.gateRadius);
     }
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
-  geometry.setIndex(indices);
+  geometry.setIndex(finalIndices);
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -1493,11 +1529,16 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
   const halfThick = thickness / 2;
 
   const positions = [];
+  const uvs = [];
   const indices = [];
   let prevMajor = null;
+  let arcLen = 0;
+  let prevP = null;
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
     const p = pointAt(t);
+    if (prevP) arcLen += p.distanceTo(prevP);
+    prevP = p.clone();
     const tangent = pointAt(Math.min(t + 1e-3, 1)).sub(pointAt(Math.max(t - 1e-3, 0))).normalize();
     // Blend from the arm's own TRUE local surface normal at the tip (so
     // the ribbon starts flush with the actual star surface instead of
@@ -1546,6 +1587,17 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     const c2 = p.clone().addScaledVector(rMajor, halfW).addScaledVector(rMinor, halfThick);
     const c3 = p.clone().addScaledVector(rMajor, -halfW).addScaledVector(rMinor, halfThick);
     positions.push(c0.x, c0.y, c0.z, c1.x, c1.y, c1.z, c2.x, c2.y, c2.z, c3.x, c3.y, c3.z);
+    // UV in the same physical (world-unit) scale `mapSolidStarToFace`'s own
+    // (u,w) uses - u = real arc-length travelled so far, v = position
+    // across the ribbon's width - so the shared `sculptureMaterial`'s
+    // tiling perforation pattern reads at a comparable density on the
+    // connector as on the star sheet it's replacing a bare, patternless
+    // material continuation of (reported: the connector's smooth, unlit
+    // surface stood out against the star's own dotted texture right at the
+    // seam). The thin thickness edges reuse the same two UV corners as
+    // their major-axis neighbor - negligible stretching given how thin
+    // the ribbon now is.
+    uvs.push(arcLen, 0, arcLen, halfW * 2, arcLen, halfW * 2, arcLen, 0);
   }
   const ring = 4;
   for (let i = 0; i < segments; i++) {
@@ -1565,6 +1617,7 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
   indices.push(0, 1, 2, 0, 2, 3);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;

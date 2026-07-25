@@ -2121,6 +2121,80 @@ effect but had not completed by the time this round was pushed (the
 headless environment has been intermittently slow to finish multi-step
 zoom scripts this session).
 
+## 36. Orphaned rim arc, connector texture mismatch, trim-edge raggedness, and near-tip hex stretch all fixed
+
+Follow-up on §35's arm-surface trim, from two more close-up screenshots:
+a thin disconnected arc still floating past the (now-shorter) star sheet,
+the star surface looking "shattered" right before each connection, the
+connector reading as a bare strip pasted onto the star's own dotted
+texture, and the hex pattern looking stretched near the tips generally.
+Four separate root causes, four separate fixes:
+
+**Orphaned rim arc ("circular arm" left of the ear lobe):** `buildStarRim`
+traces every boundary loop's own bead independently of the main sheet, and
+never received the `armTrims` cut-plane data §35 added to
+`mapSolidStarToFace` - so trimming the sheet alone left the rim's own bead
+still running out to the untouched true tip, a thin ring with nothing
+behind it once the sheet under it was cut away. `buildStarRim` now takes
+the same optional `armTrims` parameter and applies the same
+`trimTrianglesPastPlane` pass before finalizing its geometry, and
+`rebuild()`'s call site now passes it through (previously only
+`mapSolidStarToFace` got it).
+
+**Connector reading as a separate, texture-less strip:**
+`buildSpiralVortexRibbonArm`'s geometry never had a UV attribute at all,
+and the ribbon meshes were assigned `rimMaterial` - a separate, pattern-free
+finish - instead of `sculptureMaterial` (which carries the hex-perforation
+alphaMap/bumpMap the star sheet itself uses). Fixed by generating real UVs
+per ring (`u` = accumulated real-world arc-length travelled along the
+curve, `v` = position across the ribbon's width, 0 to full width - the same
+physical, world-unit scale `mapSolidStarToFace`'s own (u, w) UV already
+uses, so `patternScale` tiles at a matching density) and switching the
+ribbon meshes' material assignment to `sculptureMaterial`.
+
+**Star surface "shattering" right at the trim edge:** `trimTrianglesPastPlane`
+is a naive whole-triangle drop against an infinite cut plane, not a true
+plane/mesh intersection with re-triangulation - it leaves a jagged boundary
+that follows the star's own irregular hex/marching-squares mesh rather than
+a clean straight line. Full re-triangulation was too large a change for this
+pass; instead the cut plane is now pulled back slightly (a `marginFrac`,
+capped at 0.06 of the tip-to-center span and never more than half the
+connector's own reach) toward the tip rather than sitting exactly at the
+connector's true start point. That leaves a small strip of the arm's own
+surface in place, physically overlapped and hidden by the ribbon's own
+opaque cross-section, which is still at its full, untapered width this
+close to its start (the smoothstep width taper hasn't begun narrowing yet).
+
+**Hex pattern reading "stretched" near the tips:** `mapStarPoint` runs every
+(u, w) through `tipBendRotate` before placing it in world space - a
+rotation that stays near zero until close to a tip, then ramps up steeply
+(`tipBendPower`, default 5) up to `tipBendTwistDeg` (37° in Thick Bands).
+Both `mapSolidStarToFace` and `buildStarRim` were pushing the *raw,
+pre-rotation* (u, w) as the UV, so two points close together in raw grid
+space but at slightly different radii could end up rotated by noticeably
+different amounts - pulling them apart in world space faster than their UV
+distance implied, which the hex-perforation alphaMap read as shearing/
+stretching in exactly that last stretch before each tip. Fixed with a new
+`bentUV(u, w, R, params)` helper that runs the same `tipBendRotate` and
+returns the *rotated* coordinate for UV use instead of the raw one, so UV
+distance and in-plane world distance stay in step through the rotation. The
+dip and bulge are untouched (neither is a spatially-varying in-plane
+rotation, so neither shears the pattern the same way) - this specifically
+targets the rotation, which was the dominant source of the reported
+stretching.
+
+Verified in headless Chromium: zero console errors on Thick Bands after
+each of the four fixes; a whole-sculpture screenshot confirms the
+connectors now visibly carry the same hex-dot texture as the star sheet
+with no structural breakage; a zoomed screenshot at the same tip-junction
+framing used throughout this round's earlier verification (mouse move to
+[500, 350], wheel -1200) shows no visible ring/arc artifact, no hollow
+cross-section, and a visibly more uniform hex pattern near the tips than
+the pre-fix screenshots. This camera framing is not guaranteed to be the
+exact crop the user's own reference screenshots used, so a final check
+against the user's own close-up angle is still worth doing on the next
+round if anything still looks off there specifically.
+
 ## File layout
 
 ```
