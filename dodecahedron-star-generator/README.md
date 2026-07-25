@@ -1720,6 +1720,58 @@ the live `params` values and confirming the new preset defaults actually
 take effect, but its visual smoothness should get a final look from the
 user.
 
+## 28. Flyover: fixed a residual black-void frame and a tight/dizzying final turn in the horn-triangle crossing flourish
+
+§26 fixed the horn-triangle crossing's zoom-out (b) → (c) seam by applying
+the "look at the pivot" gaze offset at full strength immediately instead of
+easing it in. That fixed the reported problem at the time, but left a
+different, smaller one: the crossing's LANDING descend - the "last turn"
+right after the 120-degree hover, dropping back down onto the neighboring
+star's tip - eases that same offset back OUT via `1 - t^2`, timed to hit
+zero exactly as position/normal finish converging on the target. The two
+don't decay at matched rates: by ~90% through the descend, position has
+already landed almost exactly on the tip (the thinnest, narrowest part of
+the star), but the offset - sized off the whole flourish's orbit radius,
+not off how close the camera now is to that tip - still carries ~8% of its
+full magnitude. At the tip's scale, 8% of a whole-orbit-sized vector is
+still big enough to swing the look target clean off the sliver of geometry
+into the black background behind it.
+
+Found by building (then removing) a debug harness rather than guessing:
+`buildFlyoverPath` temporarily logged each phase's starting index into the
+control-point array, and a `window.__spiralDodeca` debug hook sampled the
+curve at an exact raw parameter, set the REAL camera to that pose, and cast
+a small ray grid across its actual FOV to check whether anything was
+visible on screen at all (a single center-ray test was tried first and
+produced many false positives - during ordinary tangent-hugging arm flight
+the gaze ray often grazes past the surface even though the star fills most
+of the frame from the side, so "center ray doesn't hit" is not the same as
+"screen is black"). That pinpointed one genuine all-black stretch, right
+where the phase log put it: the tail of the horn-triangle descend, confirmed
+by screenshotting that exact frame.
+
+Fixed with an extra cutoff multiplied on top of the existing `1 - t^2`,
+left at 1 (no change to the already-tuned "most of the descent" behavior)
+through the first 80% of the descend and only kicking in over the final
+20%, forcing the residual offset the rest of the way to ~0 by the time
+position has actually arrived instead of leaving it dangling at a
+still-significant fraction. Applied to both the horn-triangle crossing's
+descend and the whole-star orbit flourish's own descend, since the same
+math (and the same risk) is shared by both. The horn-triangle descend's
+sample count was also bumped from 16 to 28, denser Catmull-Rom waypoints
+through exactly the stretch reported as "quite tight, almost dizzying" -
+the same segment the void fix targets, so the reorientation that used to
+happen abruptly over a few widely-spaced samples now interpolates over
+nearly twice as many.
+
+Verified: re-ran the same debug sweep after the fix and the previously
+all-black frame (confirmed via direct screenshot at that exact camera pose)
+now shows normal geometry; an 8-second real-timing run at 5x speed (no
+debug time-injection, `flyoverSpeed: 0.15`) produced zero console errors.
+All debug hooks (`__debugPhaseLog`, `__debugScreenHasGeometryAtRaw`, and
+the phase-marking scaffolding in `buildFlyoverPath`) were removed after
+verification.
+
 ## File layout
 
 ```

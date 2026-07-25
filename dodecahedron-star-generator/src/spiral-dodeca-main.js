@@ -395,6 +395,30 @@ function smoothstep(t) {
   return x * x * (3 - 2 * x);
 }
 
+// Both flourish descends decay their "look at the pivot" gaze offset via
+// `1 - t^2` so it holds close to full strength through most of the descent
+// (avoiding the under-corrected middle stretch a straight linear falloff
+// caused) - but `1 - t^2` at t=0.96 (a couple of samples before the very
+// end) is still ~8% of the offset's FULL strength, and that offset's own
+// magnitude is sized off the whole flourish's orbit radius, not off how
+// close the camera has gotten to the tip. By the time t is that close to 1,
+// position/normal have already converged onto the tip itself - the
+// thinnest, narrowest part of the star - so an 8%-strength offset sized for
+// a whole-orbit-radius swing is still big enough in absolute terms to swing
+// the look target clean off that sliver of geometry into the black
+// background behind it (confirmed with a raycast/screenshot sweep: a
+// genuinely empty frame right in this stretch, at ~90% through the
+// horn-triangle crossing's landing descend - matching the reported "black
+// void" right after the crossing "turns and comes at the other tip"). This
+// multiplies an extra fast cutoff on TOP of `1 - t^2`, left at 1 (no change
+// to the already-tuned behavior) through the first 80% of the descent and
+// only kicking in over the final stretch, forcing the residual offset all
+// the way to ~0 by the time position has actually arrived instead of
+// leaving it dangling at a still-significant fraction.
+function descendOffsetTailCut(t) {
+  return 1 - smoothstep((t - 0.8) / 0.2);
+}
+
 // Flyover: a closed camera path built from the same geometry the render
 // pipeline uses - not an approximation. Starting at one arm's tip, each
 // "hop" (a) flies that arm inward toward its hub ("to the star face"),
@@ -643,13 +667,17 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, threeCycles, 
     // full strength through most of the descent and only relaxes it in the
     // final stretch, right as position/normal are themselves converging on
     // the target anyway.
-    const htDescendSamples = 16;
+    // Bumped from 16 to 28 samples - denser waypoints for the Catmull-Rom
+    // curve to interpolate between, smoothing what was reported as a
+    // "tight, almost dizzying" final turn right after the horn-triangle
+    // hover (the same stretch the black-void fix above targets).
+    const htDescendSamples = 28;
     for (let i = 1; i <= htDescendSamples; i++) {
       const t = smoothstep(i / htDescendSamples);
       const pos = htOrbitPoint(htEndAngle, htOrbitHeight).lerp(targetPoint, t);
       const normal = htNormal.clone().lerp(targetNormal, t).normalize();
       const speed = ARC_SLOW_SPEED + (ARC_EMERGE_SPEED - ARC_SLOW_SPEED) * t;
-      const offset = htLookAtCenterOffset(htEndAngle, htOrbitHeight).multiplyScalar(1 - t * t);
+      const offset = htLookAtCenterOffset(htEndAngle, htOrbitHeight).multiplyScalar((1 - t * t) * descendOffsetTailCut(t));
       pushPoint(pos, normal, offset, speed);
     }
 
@@ -736,7 +764,7 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, threeCycles, 
       const angle = cruiseEndAngle + descendSpan * (i / descendDenom);
       const pos = orbitPoint(angle, orbitHeight).lerp(targetPoint, t);
       const normal = orbitFace.normal.clone().lerp(targetNormal, t).normalize();
-      const offset = lookAtCenterOffset(angle, orbitHeight).multiplyScalar(1 - t * t);
+      const offset = lookAtCenterOffset(angle, orbitHeight).multiplyScalar((1 - t * t) * descendOffsetTailCut(t));
       pushPoint(pos, normal, offset, 1);
     }
 
