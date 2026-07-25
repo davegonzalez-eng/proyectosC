@@ -1789,6 +1789,92 @@ those aren't part of a preset's appearance, they're live view state.
 Verified in headless Chromium: selecting the preset reads back every one of
 these eight values exactly, with zero console errors.
 
+## 30. Two coral-inspired texture patterns; two more Star Odyssey presets (thicker tips, ribbon connectors)
+
+Three additions from the same round of feedback.
+
+**Two brain-coral texture patterns**, from a user-supplied reference photo
+of real brain coral (Diploria) - continuous meandering ridges/grooves, not
+discrete cells, with a scatter of tiny corallite pits. `createPerforationTexture`'s
+existing "coral" option (jittered hex cells) doesn't produce that look at
+all - it's still a polygon grid underneath. Built a new generator instead,
+`createCoralMazeTexture`, from a domain-warped sine-interference field (a
+cheap reaction-diffusion-style "worm pattern"): `v = sin(ridge freq *
+warped x) + sin(ridge freq * warped y)`, thresholding a band around `v = 0`
+for the groove. Every sin() term's frequency is an integer multiple of
+`1/width` or `1/height`, so the field - and the warp feeding into it, built
+the same way - is already exactly periodic across the tile; no explicit
+seam-matching needed for `RepeatWrapping`. Grooves are shaded (relief via
+the bump map) rather than punched (they stay well above the alphaTest
+cutoff, since real brain coral has no holes, just grooves); a sparse
+scatter of small round pores IS punched fully through, for the tiny pits
+visible in the reference, using the same wrapped-position hash scatter the
+hex patterns use.
+
+First attempt (`ridgeFreq` 7/4, `warpAmp` 0.38/0.55) rendered as a dense,
+aliased hatching mess instead of a smooth meander - rendering the raw
+canvas standalone (outside the app, at 3x scale) and comparing directly
+against the reference photo showed why: `warpAmp` feeds into the *same*
+sin() term `ridgeFreq` multiplies, so its real contribution to the field is
+`ridgeFreq * warpAmp` cycles worth of extra phase, not `warpAmp` alone - at
+those values that worked out to 2-4 extra full cycles of warp stacked on
+top of the base ridge frequency. Retuned so `ridgeFreq * warpAmp` stays
+under ~1 (0.08/0.12 at the same frequencies) and bumped the raster from
+`cellPx` 28 to 44 for less aliasing - re-rendered standalone, now reads as
+a smooth organic meander. Wired in as two new "Pattern" dropdown options,
+"Brain coral (fine maze)" (`ridgeFreq: 7`) and "Brain coral (wide ridges)"
+(`ridgeFreq: 4`), reusing the existing "Hole size" slider for pore density
+(`poreFrac = holeSize * 0.35`) so switching patterns doesn't need a new
+control.
+
+**"Star Odyssey - Thicker"**, a fourth preset: another live-tuned export
+from the user, same architecture as Star Odyssey but with `tipWidthFrac`
+0.39→0.57 (noticeably wider tips), `hubRadiusFrac` 0.17→0.14 (smaller hub),
+`tipBendStrength`/`tipBendTwistDeg` back up to 0.12/37, golden material
+instead of matte white, and `spiralArcWidthFrac` 0.075→0.08.
+
+**"Star Odyssey - Thick Bands"**, a fifth preset, addressing "instead of
+[the connectors'] current shape (cylinders/wires meeting at a central
+point)... ribbons that are wider but flatter meeting at the same point"
+plus a requested "half twist (similar to... a Mobius strip)... as the star
+arm twists and becomes the band". Added `buildSpiralVortexRibbonArm` in
+`spiralarm.js`: the same `spiralVortexPointAt` curve `buildSpiralVortexArm`
+already extrudes into a tapering circular tube, extruded instead with a
+wide/thin rectangular cross-section, with a progressive twist
+(`spiralHalfTwists`, in units of 180 degrees) applied around the curve's
+own tangent from tip (0) to center (`halfTwists` full half-turns) - Mobius-
+strip style. The cross-section's orientation is built the way
+`buildHornArc`'s bead already is (`major = tangent x radial`, `minor =
+tangent x major`, using the point's own position as a stand-in for the
+local outward direction) rather than the tube's arbitrary world-axis
+fallback: a circular cross-section looks identical no matter how it's
+rotated, so the tube never needed a "correct" orientation, but a flat
+ribbon's whole visual identity IS its orientation - this keeps its width
+roughly in-surface and thickness roughly radial at every point, so it
+reads as a continuation of the flat star sheet instead of an arbitrarily-
+rotated band. A per-step "don't flip" guard (negate the new major if it
+points more against the previous step's than with it) stops the frame from
+snapping 180 degrees around a cross-product sign ambiguity, which would
+otherwise show as a sudden kink unrelated to the deliberate twist.
+
+New connector style `'spiralRibbon'` (alongside the existing `'hornArc'`,
+`'snapHub'`, `'spiralVortex'`), wired into `rebuild()`'s connector-building
+branch the same way the other three are. New sliders: "Ribbon width",
+"Ribbon thickness", and "Half-twists" - shown only for `spiralRibbon`;
+"Spiral turns"/"Spiral sweep" (which shape the curve both spiral styles
+share) now show for either spiral style, split out of the tube-only
+`spiralArcWidthFrac` control into their own always-shared panel, so
+switching between the two spiral connector styles doesn't leave a "tube
+width" slider on screen that does nothing in ribbon mode or vice versa -
+the same "no dangling controls" principle §27 established for the
+horn-arc/spiral-vortex split.
+
+Verified in headless Chromium: all five presets (Stardream #1, 3D
+Printing, Star Odyssey, Star Odyssey - Thicker, Star Odyssey - Thick
+Bands) load with zero console errors; the two coral patterns' raw canvas
+output was checked standalone against the reference photo before and after
+the warp-amplitude fix.
+
 ## File layout
 
 ```

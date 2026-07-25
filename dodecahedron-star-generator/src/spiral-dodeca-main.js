@@ -18,8 +18,8 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections, computeThreeCycles } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup } from './spiralarm.js';
-import { createPerforationTexture } from './hextexture.js';
+import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup } from './spiralarm.js';
+import { createPerforationTexture, createCoralMazeTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
 
@@ -144,11 +144,25 @@ function applyPattern() {
     sculptureMaterial.bumpMap = null;
     sculptureMaterial.alphaTest = 0;
   } else {
-    const tex = createPerforationTexture({
-      cellPx: 28,
-      holeFrac: params.holeSize,
-      jitter: params.pattern === 'coral' ? 0.45 : 0,
-    });
+    let tex;
+    if (params.pattern === 'coralMaze' || params.pattern === 'coralRidge') {
+      // Two brain-coral-inspired meander presets (fine winding vs. wide
+      // channels) - `holeSize` doubles as the tiny corallite pits' density
+      // here, the same slider the hex patterns use for hole size, so
+      // switching patterns doesn't need a second control.
+      tex = createCoralMazeTexture({
+        cellPx: 44,
+        ridgeFreq: params.pattern === 'coralMaze' ? 7 : 4,
+        warpAmp: params.pattern === 'coralMaze' ? 0.08 : 0.12,
+        poreFrac: params.holeSize * 0.35,
+      });
+    } else {
+      tex = createPerforationTexture({
+        cellPx: 28,
+        holeFrac: params.holeSize,
+        jitter: params.pattern === 'coral' ? 0.45 : 0,
+      });
+    }
     // UVs are (u, w) in world units; repeat = pattern tiles per world unit.
     tex.repeat.set(params.patternScale, params.patternScale);
     sculptureMaterial.alphaMap = tex;
@@ -272,6 +286,12 @@ const params = {
   spiralTurns: 0.22,
   spiralSweepFrac: 0.22,
   spiralArcWidthFrac: 0.035,
+  // Star Odyssey "thick bands" connector shape: same spiral curve as
+  // above, extruded as a flat ribbon instead of a tapering tube, with a
+  // progressive twist (in half-turns) applied along its length.
+  spiralRibbonWidthFrac: 0.09,
+  spiralRibbonThicknessFrac: 0.012,
+  spiralHalfTwists: 1,
 };
 
 // Three named parameter bundles, applied wholesale via setParams() from the
@@ -351,12 +371,14 @@ const PRESETS = {
   starOdyssey: {
     // Retuned to the user's own live-session values (starRotationDeg,
     // tipScale, hubRadiusFrac, bandHalfWidth, the spiral shape params, and
-    // lampMode all moved off their original §25/§27 defaults).
-    starRotationDeg: 19, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.2,
-    bandHalfWidth: 0.305, tipWidthFrac: 0.12, widthTaperPower: 0.9,
+    // lampMode all moved off their original §25/§27 defaults). Second
+    // round: hubRadiusFrac, tipWidthFrac, tipBendStrength/TwistDeg,
+    // material, holeSize, and spiralArcWidthFrac retuned again.
+    starRotationDeg: 19, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.17,
+    bandHalfWidth: 0.305, tipWidthFrac: 0.39, widthTaperPower: 0.9,
     thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
     tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
-    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
+    tipBendStrength: 0.09, tipBendTwistDeg: 24, tipBendPower: 5,
     // Same reasoning as print3d's hub/peg pieces: the spiral funnels ARE
     // this preset's headline feature, so `showExtensions` must default to
     // true or they never get built - that, not a broken checkbox, was why
@@ -364,7 +386,44 @@ const PRESETS = {
     showExtensions: true, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
     fieldGrid: 144,
     singleFaceMode: false, connectorStyle: 'spiralVortex', snapEnabled: false,
-    spiralTurns: 0.1, spiralSweepFrac: 0.02, spiralArcWidthFrac: 0.025,
+    spiralTurns: 0.1, spiralSweepFrac: 0.02, spiralArcWidthFrac: 0.075,
+    material: 'matteWhite', pattern: 'hex', holeSize: 0.27, patternScale: 3.2,
+    lampMode: false, lampIntensity: 19,
+  },
+  // A second Star Odyssey tuning, from the user's own live-session export
+  // again - wider tips (tipWidthFrac 0.39->0.57), a smaller hub, gold
+  // instead of matte white, and a wider spiral bead (spiralArcWidthFrac
+  // 0.075->0.08) than `starOdyssey` above.
+  odysseyThicker: {
+    starRotationDeg: 14, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.14,
+    bandHalfWidth: 0.305, tipWidthFrac: 0.57, widthTaperPower: 0.9,
+    thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
+    tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
+    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
+    showExtensions: true, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
+    fieldGrid: 144,
+    singleFaceMode: false, connectorStyle: 'spiralVortex', snapEnabled: false,
+    spiralTurns: 0.1, spiralSweepFrac: 0.02, spiralArcWidthFrac: 0.08,
+    material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
+    lampMode: false, lampIntensity: 19,
+  },
+  // Same star shape as `odysseyThicker` - the brief here was specifically
+  // to change the CONNECTOR's cross-section, not the stars again - but
+  // `connectorStyle: 'spiralRibbon'` extrudes each spiral as a flat, wide
+  // band instead of a tapering tube, with a half-twist (Mobius-strip
+  // style) along its length as it leaves the arm and spirals in to meet
+  // the other two bands at the shared vertex center.
+  odysseyThickBands: {
+    starRotationDeg: 14, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.14,
+    bandHalfWidth: 0.305, tipWidthFrac: 0.57, widthTaperPower: 0.9,
+    thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
+    tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
+    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
+    showExtensions: true, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
+    fieldGrid: 144,
+    singleFaceMode: false, connectorStyle: 'spiralRibbon', snapEnabled: false,
+    spiralTurns: 0.1, spiralSweepFrac: 0.02,
+    spiralRibbonWidthFrac: 0.09, spiralRibbonThicknessFrac: 0.012, spiralHalfTwists: 1,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: false, lampIntensity: 19,
   },
@@ -906,6 +965,18 @@ function rebuild() {
         extGroup.add(vortexGroup);
         connectorCount++;
       }
+    } else if (params.connectorStyle === 'spiralRibbon') {
+      // Star Odyssey - Thick Bands: same 3-way spiral, extruded as a flat
+      // ribbon (with an optional Mobius-style half-twist) instead of a
+      // tapering tube.
+      for (const triple of threeCycles) {
+        const tips = triple.map((label) => tipsByLabel.get(label));
+        if (tips.some((t) => !t)) { missing++; continue; }
+        const ribbonGroup = buildSpiralVortexRibbonGroup(tips[0], tips[1], tips[2], { R, ...params });
+        ribbonGroup.children.forEach((m) => { m.material = rimMaterial; });
+        extGroup.add(ribbonGroup);
+        connectorCount++;
+      }
     }
   }
 
@@ -969,6 +1040,9 @@ bindSlider('extClothoid', 'extClothoid');
 bindSlider('spiralTurns', 'spiralTurns');
 bindSlider('spiralSweepFrac', 'spiralSweepFrac');
 bindSlider('spiralArcWidthFrac', 'spiralArcWidthFrac');
+bindSlider('spiralRibbonWidthFrac', 'spiralRibbonWidthFrac');
+bindSlider('spiralRibbonThicknessFrac', 'spiralRibbonThicknessFrac');
+bindSlider('spiralHalfTwists', 'spiralHalfTwists');
 bindSlider('rimWidthFrac', 'rimWidthFrac');
 bindSlider('rimProudFrac', 'rimProudFrac');
 bindSlider('holeSize', 'holeSize', { appearanceOnly: true });
@@ -1034,6 +1108,8 @@ const PRESET_HINTS = {
   stardream1: 'Original assembled sculpture, 20 tip-to-tip horn-triangle arcs.',
   print3d: 'One detailed face at a time, sized for a real print - peg + socket friction-fit joints (small hub piece per vertex) instead of the fused horn arc. Pick which face with the slider below.',
   starOdyssey: "Same stars as #1, but every horn-triangle arc is replaced by a 3-way spiral funnel converging at that vertex's center.",
+  odysseyThicker: 'Star Odyssey with wider, chunkier tips and a smaller hub - a second live-tuned variant.',
+  odysseyThickBands: 'Star Odyssey with the spiral connectors as flat, wide ribbons instead of tapered tubes, with a half-twist along each band as it leaves the arm and spirals in to meet the other two.',
 };
 // Each connector style has its own shape sliders (the horn arc's
 // length/depth/clothoid params mean nothing to the spiral vortex, and vice
@@ -1042,8 +1118,13 @@ const PRESET_HINTS = {
 // this: Star Odyssey used the horn-arc panel's sliders (and its own
 // "Show connectors" checkbox check) despite reading none of those params.
 function updateConnectorControlsVisibility() {
+  const isSpiral = params.connectorStyle === 'spiralVortex' || params.connectorStyle === 'spiralRibbon';
   document.getElementById('hornArcControls').style.display = params.connectorStyle === 'hornArc' ? 'block' : 'none';
-  document.getElementById('spiralVortexControls').style.display = params.connectorStyle === 'spiralVortex' ? 'block' : 'none';
+  // Turns/sweep shape the same underlying curve for both spiral styles;
+  // width is style-specific (tube radius vs. ribbon width+thickness+twist).
+  document.getElementById('spiralCurveControls').style.display = isSpiral ? 'block' : 'none';
+  document.getElementById('spiralVortexTubeControls').style.display = params.connectorStyle === 'spiralVortex' ? 'block' : 'none';
+  document.getElementById('spiralRibbonControls').style.display = params.connectorStyle === 'spiralRibbon' ? 'block' : 'none';
 }
 document.getElementById('preset').addEventListener('change', (e) => {
   const name = e.target.value;

@@ -170,3 +170,106 @@ export function createPerforationTexture({ cellPx = 28, holeFrac = 0.24, jitter 
   texture.colorSpace = THREE.NoColorSpace;
   return texture;
 }
+
+/**
+ * Continuous meandering ridge/valley "maze" pattern inspired by brain-coral
+ * (Diploria) surface texture, per a user-supplied reference photo - real
+ * brain coral has no discrete cells at all, just winding grooves between
+ * raised ridges, with a scatter of tiny corallite pits. Built from a
+ * domain-warped sine-interference field (a cheap reaction-diffusion-style
+ * "worm pattern") instead of `createPerforationTexture`'s polygon grid -
+ * `v = sin(ridge freq * warped x) + sin(ridge freq * warped y)`, threshold
+ * a thin band around `v = 0` for the groove. Every sin() term's frequency
+ * is an INTEGER multiple of 1/width or 1/height, so each term - and the
+ * warp built the same way feeding into it - is already exactly periodic
+ * across the tile; no explicit seam-matching needed for RepeatWrapping.
+ *
+ * The grooves stay well above the alphaTest cutoff (shaded, not punched -
+ * they're relief, not holes) so the surface stays structurally solid; a
+ * separate sparse scatter of small round pores IS punched fully through
+ * (true alpha holes), the same wrapped-position hash scatter the other
+ * patterns use, for the tiny pits visible in the reference.
+ *
+ * `warpAmp` feeds into the SAME sin() term `ridgeFreq` multiplies, so its
+ * effective contribution to the field is `ridgeFreq * warpAmp` cycles worth
+ * of extra phase, not `warpAmp` alone - at the first values tried (0.35-0.55)
+ * that worked out to 2-4 extra full cycles of warp on top of the base ridge
+ * frequency, which produced a dense, aliased hatching mess instead of a
+ * smooth meander (confirmed by rendering the raw canvas standalone and
+ * comparing against the reference photo). Keeping `ridgeFreq * warpAmp`
+ * under ~1 is what actually reads as an organic wobble on top of the base
+ * frequency rather than a second, higher one fighting it.
+ *
+ * @param {object} [options]
+ * @param {number} [options.cellPx=44] sets canvas resolution only - no discrete cells are drawn
+ * @param {number} [options.ridgeFreq=6] meanders per tile - lower reads as wider, coarser channels
+ * @param {number} [options.warpAmp=0.1] domain-warp strength - keep `ridgeFreq * warpAmp` under ~1 or the field aliases into fine hatching instead of a smooth meander
+ * @param {number} [options.poreFrac=0.08] fraction of candidate pore sites actually punched as real holes
+ * @returns {THREE.CanvasTexture}
+ */
+export function createCoralMazeTexture({ cellPx = 44, ridgeFreq = 6, warpAmp = 0.1, poreFrac = 0.08 } = {}) {
+  const colStep = Math.sqrt(3) * cellPx;
+  const rowStep = 1.5 * cellPx;
+  const width = Math.round(TEXTURE_COLS * colStep);
+  const height = Math.round(TEXTURE_ROWS * rowStep);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(width, height);
+
+  const TWO_PI = Math.PI * 2;
+  const kx = ridgeFreq;
+  // Matches the ridge spacing in x/y despite the canvas itself not being
+  // square (TEXTURE_COLS != TEXTURE_ROWS) - without this the maze reads as
+  // visibly stretched.
+  const ky = Math.round(ridgeFreq * (height / width)) || ridgeFreq;
+  const warpKx = 2;
+  const warpKy = 3; // low frequency so the warp reads as organic drift, not a second grid
+
+  for (let py = 0; py < height; py++) {
+    const y = py / height;
+    for (let px = 0; px < width; px++) {
+      const x = px / width;
+      const wx = warpAmp * Math.sin(TWO_PI * (warpKx * x + warpKy * y));
+      const wy = warpAmp * Math.sin(TWO_PI * (warpKy * x - warpKx * y));
+      const v = Math.sin(TWO_PI * kx * (x + wx)) + Math.sin(TWO_PI * ky * (y + wy));
+      // v spans roughly -2..2; a thin band around 0 is the groove.
+      const grooveT = Math.max(0, 1 - Math.abs(v) / 0.55);
+      const shade = 235 - grooveT * 90; // 235 (ridge top) down to ~145 (groove floor) - stays well above alphaTest*255
+      const idx = (py * width + px) * 4;
+      img.data[idx] = img.data[idx + 1] = img.data[idx + 2] = shade;
+      img.data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  // Sparse true perforations - the tiny corallite pits.
+  const poreCellPx = cellPx * 0.55;
+  const poreCols = Math.ceil(width / poreCellPx);
+  const poreRows = Math.ceil(height / poreCellPx);
+  ctx.fillStyle = '#000';
+  const wrap = (v, m) => ((v % m) + m) % m;
+  for (let row = -1; row <= poreRows; row++) {
+    for (let col = -1; col <= poreCols; col++) {
+      const cx0 = col * poreCellPx;
+      const cy0 = row * poreCellPx;
+      const hx = Math.round(wrap(cx0, width) * 10);
+      const hy = Math.round(wrap(cy0, height) * 10);
+      if (hash2(hx, hy) > poreFrac) continue;
+      const jx = (hash2(hx, hy + 1) - 0.5) * poreCellPx * 0.7;
+      const jy = (hash2(hx + 1, hy) - 0.5) * poreCellPx * 0.7;
+      const r = poreCellPx * (0.12 + 0.1 * hash2(hx + 2, hy + 2));
+      ctx.beginPath();
+      ctx.arc(cx0 + poreCellPx / 2 + jx, cy0 + poreCellPx / 2 + jy, r, 0, TWO_PI);
+      ctx.fill();
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.NoColorSpace;
+  return texture;
+}

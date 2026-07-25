@@ -135,7 +135,9 @@
     <div class="row"><label><span>Pattern</span></label>
       <select id="pattern">
         <option value="hex" selected>Hex grid</option>
-        <option value="coral">Irregular (coral)</option>
+        <option value="coral">Irregular (coral cells)</option>
+        <option value="coralMaze">Brain coral (fine maze)</option>
+        <option value="coralRidge">Brain coral (wide ridges)</option>
         <option value="none">None (solid)</option>
       </select>
     </div>
@@ -178,10 +180,17 @@
       <div class="row"><label><span>Arc bead width / R_out</span><span id="v-extArcWidthFrac">0.04</span></label><input id="extArcWidthFrac" type="range" min="0.005" max="0.12" step="0.005" value="0.04"></div>
       <div class="row"><label><span>Clothoid curvature match (0 = off)</span><span id="v-extClothoid">1</span></label><input id="extClothoid" type="range" min="0" max="2" step="0.05" value="1"></div>
     </div>
-    <div id="spiralVortexControls" style="display:none;">
+    <div id="spiralCurveControls" style="display:none;">
       <div class="row"><label><span>Spiral turns</span><span id="v-spiralTurns">0.22</span></label><input id="spiralTurns" type="range" min="0" max="1" step="0.01" value="0.22"></div>
       <div class="row"><label><span>Spiral sweep (bulge)</span><span id="v-spiralSweepFrac">0.22</span></label><input id="spiralSweepFrac" type="range" min="0" max="0.6" step="0.01" value="0.22"></div>
+    </div>
+    <div id="spiralVortexTubeControls" style="display:none;">
       <div class="row"><label><span>Spiral bead width / R_out</span><span id="v-spiralArcWidthFrac">0.035</span></label><input id="spiralArcWidthFrac" type="range" min="0.005" max="0.08" step="0.005" value="0.035"></div>
+    </div>
+    <div id="spiralRibbonControls" style="display:none;">
+      <div class="row"><label><span>Ribbon width / R_out</span><span id="v-spiralRibbonWidthFrac">0.09</span></label><input id="spiralRibbonWidthFrac" type="range" min="0.02" max="0.18" step="0.005" value="0.09"></div>
+      <div class="row"><label><span>Ribbon thickness / R_out</span><span id="v-spiralRibbonThicknessFrac">0.012</span></label><input id="spiralRibbonThicknessFrac" type="range" min="0.002" max="0.03" step="0.001" value="0.012"></div>
+      <div class="row"><label><span>Half-twists (Mobius, tip to center)</span><span id="v-spiralHalfTwists">1</span></label><input id="spiralHalfTwists" type="range" min="0" max="3" step="1" value="1"></div>
     </div>
 
     <h2>Cross-section (pane)</h2>
@@ -218,6 +227,8 @@
       <option value="stardream1" selected>Stardream #1</option>
       <option value="print3d">Stardream - 3D Printing</option>
       <option value="starOdyssey">Star Odyssey</option>
+      <option value="odysseyThicker">Star Odyssey - Thicker</option>
+      <option value="odysseyThickBands">Star Odyssey - Thick Bands</option>
     </select></div>
     <div class="row" id="singleFaceRow" style="display:none;">
       <label><span>Face</span><span id="v-singleFaceIndex">0</span></label>

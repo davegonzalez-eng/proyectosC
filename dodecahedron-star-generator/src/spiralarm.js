@@ -1358,6 +1358,121 @@ export function buildSpiralVortexGroup(tipA, tipB, tipC, params = {}) {
   return group;
 }
 
+/**
+ * Flat-ribbon variant of `buildSpiralVortexArm`: same
+ * `spiralVortexPointAt` curve, but extruded with a wide/thin rectangular
+ * cross-section instead of a circular one - reads as a band rather than a
+ * wire - with an optional progressive twist (`halfTwists`, in units of 180
+ * degrees) applied around the curve's own tangent from tip to center,
+ * Mobius-strip style ("the star arm twists and becomes the band that meets
+ * three other bands at the same point").
+ *
+ * The cross-section's own orientation is built the same way
+ * `buildHornArc`'s bead is (`major = tangent x radial`, `minor = tangent x
+ * major`, using the point's own position as a stand-in for the local
+ * outward/radial direction) rather than the tube's arbitrary world-axis
+ * fallback - a circular cross-section looks identical no matter how it's
+ * rotated, so the tube never needed a "correct" orientation, but a flat
+ * ribbon's whole visual identity IS its orientation: this keeps its width
+ * roughly in-surface and its thickness roughly radial at every point,
+ * matching the flat star sheet the ribbon is meant to be a continuation of.
+ * A per-step "don't flip" guard (negate the new major if it points more
+ * against the previous step's than with it) stops the frame from
+ * momentarily snapping 180 degrees around a cross-product sign ambiguity,
+ * which would otherwise show as a sudden visible kink unrelated to the
+ * deliberate `halfTwists` twist.
+ */
+function buildSpiralVortexRibbonArm(tip, center, options = {}) {
+  const {
+    segments = 48,
+    startWidth = 0.08,
+    endWidthFrac = 0.35,
+    thickness = 0.012,
+    halfTwists = 0,
+  } = options;
+  const pointAt = spiralVortexPointAt(tip, center, options);
+  const endWidth = startWidth * endWidthFrac;
+  const halfThick = thickness / 2;
+
+  const positions = [];
+  const indices = [];
+  let prevMajor = null;
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const p = pointAt(t);
+    const tangent = pointAt(Math.min(t + 1e-3, 1)).sub(pointAt(Math.max(t - 1e-3, 0))).normalize();
+    const radial = p.clone().normalize();
+    const major = new THREE.Vector3().crossVectors(tangent, radial);
+    if (major.lengthSq() < 1e-10) {
+      major.set(Math.abs(tangent.x) < 0.9 ? 1 : 0, Math.abs(tangent.x) < 0.9 ? 0 : 1, 0);
+      major.addScaledVector(tangent, -major.dot(tangent));
+    }
+    major.normalize();
+    if (prevMajor && major.dot(prevMajor) < 0) major.negate();
+    prevMajor = major;
+    const minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
+
+    // Progressive Mobius-style twist around the tangent, ramping linearly
+    // from 0 at the tip (t=0) to `halfTwists` half-turns at the center (t=1).
+    const angle = halfTwists * Math.PI * t;
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    const rMajor = major.clone().multiplyScalar(cosA).addScaledVector(minor, sinA);
+    const rMinor = minor.clone().multiplyScalar(cosA).addScaledVector(major, -sinA);
+
+    const halfW = THREE.MathUtils.lerp(startWidth, endWidth, t) / 2;
+    const c0 = p.clone().addScaledVector(rMajor, -halfW).addScaledVector(rMinor, -halfThick);
+    const c1 = p.clone().addScaledVector(rMajor, halfW).addScaledVector(rMinor, -halfThick);
+    const c2 = p.clone().addScaledVector(rMajor, halfW).addScaledVector(rMinor, halfThick);
+    const c3 = p.clone().addScaledVector(rMajor, -halfW).addScaledVector(rMinor, halfThick);
+    positions.push(c0.x, c0.y, c0.z, c1.x, c1.y, c1.z, c2.x, c2.y, c2.z, c3.x, c3.y, c3.z);
+  }
+  const ring = 4;
+  for (let i = 0; i < segments; i++) {
+    for (let k = 0; k < ring; k++) {
+      const k1 = (k + 1) % ring;
+      const s0 = i * ring + k, s1 = i * ring + k1, s2 = (i + 1) * ring + k, s3 = (i + 1) * ring + k1;
+      indices.push(s0, s2, s1, s1, s2, s3);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
+ * Ribbon variant of `buildSpiralVortexGroup` - see
+ * `buildSpiralVortexRibbonArm` for the shape itself.
+ * @returns {THREE.Group}
+ */
+export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
+  const {
+    R = 1,
+    spiralTurns = 0.65,
+    spiralSweepFrac = 0.4,
+    spiralRibbonWidthFrac = 0.09,
+    spiralRibbonThicknessFrac = 0.012,
+    spiralHalfTwists = 1,
+  } = params;
+  const center = hornTriangleCenter(tipA, tipB, tipC);
+  const group = new THREE.Group();
+  const startWidth = R * spiralRibbonWidthFrac;
+  const thickness = R * spiralRibbonThicknessFrac;
+  for (const tip of [tipA, tipB, tipC]) {
+    const geom = buildSpiralVortexRibbonArm(tip, center, {
+      turns: spiralTurns,
+      sweepFrac: spiralSweepFrac,
+      startWidth,
+      thickness,
+      halfTwists: spiralHalfTwists,
+    });
+    group.add(new THREE.Mesh(geom));
+  }
+  return group;
+}
+
 export function buildHornArc(tipA, tipB, options = {}) {
   const {
     arcWidth = 0.04,    // full in-surface width of the bead
