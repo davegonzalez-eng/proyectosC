@@ -1968,6 +1968,69 @@ was attempted but not obtained this round (the headless environment was
 intermittently unable to complete multi-step zoom scripts); the whole-
 sculpture view confirms the change renders without error.
 
+## 33. Found the ear lobe's real cause: the ribbon frame's "up" vector wasn't the star's actual surface normal
+
+§32's meet-point relocation didn't fix the reported bulge - the user supplied
+close-up screenshots showing it persists even at `spiralLaunchFrac: 0`
+(the connector starting exactly at the true tip, same as before §32 ever
+existed), which rules out meet-point position as the cause and points at
+the ribbon's cross-section ORIENTATION instead.
+
+`buildSpiralVortexRibbonArm` was building its "radial" reference (used to
+derive the ribbon's major/minor axes) from `point.clone().normalize()` -
+the point's position relative to the world origin, i.e. a sphere-radial
+approximation. This exact class of bug already has a fix elsewhere in this
+project: the flyover camera's hover offset used the same sphere-radial
+shortcut and was measured (§67-68) to be off from the star's TRUE local
+surface normal by up to ~27 degrees right where the exponential tip-bend
+curls the surface near a tip - close to the connector's meet point by
+construction. A ribbon's flat cross-section is far more sensitive to a
+wrong "up" than a circular tube (which looks the same no matter how it's
+rotated) or the old horn-arc bead (round in cross-section) ever were - a
+27-degree frame error shows up directly as a visible kink/wedge sticking
+out at the seam, matching the screenshots exactly, and explaining why it
+didn't budge when only the meet POSITION moved.
+
+Fixed at the source: `computeArmTips` (used by both `mapSolidStarToFace`
+and the single-face-mode lightweight tip path, so every caller gets it)
+now also computes each tip's TRUE local surface normal, via the identical
+finite-difference cross-product `mapArmCenterlineWithNormal` already uses
+for the rest of an arm (`cross(∂point/∂u, ∂point/∂w)` at the tip's own 2D
+coordinate). `buildSpiralVortexRibbonArm` blends from this true tip normal
+(at t=0) to the sphere-radial approximation over the curve's first 35% -
+beyond that stretch the connector is well clear of the star's own
+geometry, where the coarser approximation is fine and a true surface
+normal doesn't even mean anything.
+
+Two more contributors addressed at the same time, both matching the
+zero-slope-at-the-tip philosophy `spiralVortexPointAt`'s own swirl envelope
+already uses elsewhere in this file: the progressive quarter-turn twist
+(§32) eased from a linear `t` onset to `t^2` (zero value AND zero slope at
+the tip, so the cross-section doesn't immediately start rotating away from
+"flush with the surface" right at the seam), and the width taper switched
+from a linear lerp to a smoothstep, so the ribbon stays close to full
+width longer near the tip - more coverage right at the junction, reading
+as fused into the arm rather than a sudden narrow stem, per the request to
+make that junction "thicker" and better covered.
+
+A fourth request - literally trimming material out of the star arm's own
+solid geometry so the connector can be inlaid/fused into a matching notch
+- was NOT attempted this round: it would need the star's field-based
+solid-geometry construction (`buildSolidStar2D`, currently only ever
+subtracted from for the small circular snap-hole sockets) to cut a notch
+shaped like the connector's own footprint, coordinating 2D star-space
+geometry with the 3D connector shape - a substantially larger, riskier
+change than adjusting the connector's own frame/taper. Deferred pending
+whether the frame fix above resolves the reported bulge on its own.
+
+Verified in headless Chromium: zero console errors switching to the
+preset; the whole-sculpture view renders without error. A zoomed
+screenshot of the same tip region shown in the user's report was queued
+for direct before/after comparison but had not completed by the time this
+round was pushed (the headless environment has been intermittently slow
+to finish multi-step zoom scripts this session) - visual confirmation that
+the bulge is actually gone is still outstanding.
+
 ## File layout
 
 ```

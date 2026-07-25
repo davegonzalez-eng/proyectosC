@@ -859,16 +859,31 @@ export function mapSolidStarToFace(star2D, face, params = {}) {
  * tip data (single-face print mode's hidden faces, which still need their
  * tips for the snap-hub pieces and connectors but not their full mesh) can
  * skip the expensive top/bottom-sheet + wall vertex construction entirely.
- * @returns {{armIndex: number, tipPosition: THREE.Vector3, tipTangent: THREE.Vector3, tipCurvature: THREE.Vector3}[]}
+ * @returns {{armIndex: number, tipPosition: THREE.Vector3, tipTangent: THREE.Vector3, tipNormal: THREE.Vector3, tipCurvature: THREE.Vector3}[]}
  */
 export function computeArmTips(star2D, face, params = {}) {
   const R = star2D.R;
   const place = (u, w) => mapStarPoint(u, w, R, face, params);
+  const eps = R * 1e-3;
   return star2D.tips2D.map(({ tip, prev, prev2 }, armIndex) => {
     const p0 = place(tip.x, tip.y);
     const p1 = place(prev.x, prev.y);
     const p2 = place(prev2.x, prev2.y);
     const tangent = p0.clone().sub(p1).normalize();
+    // TRUE local surface normal at the tip (same finite-difference
+    // cross-product `mapArmCenterlineWithNormal` uses for the rest of the
+    // arm), not a sphere-radial approximation - measured up to ~27 degrees
+    // apart right where the exponential tip-bend curls the surface near a
+    // tip (the same mismatch already documented/fixed for the flyover
+    // camera's hover offset). A connector frame built off the wrong "up"
+    // here shows up as a visible kink/wedge exactly where it meets the
+    // arm ("ear lobe").
+    const pu = place(tip.x + eps, tip.y).sub(place(tip.x - eps, tip.y));
+    const pw = place(tip.x, tip.y + eps).sub(place(tip.x, tip.y - eps));
+    const tipNormal = new THREE.Vector3().crossVectors(pu, pw);
+    if (tipNormal.lengthSq() < 1e-16) tipNormal.copy(p0).normalize();
+    else tipNormal.normalize();
+    if (tipNormal.dot(face.normal) < 0) tipNormal.negate();
     // Discrete curvature at the tip - circumcircle of the first three
     // centerline samples, with the curvature normal taken from the second
     // difference (tangential component removed). Measured in WORLD space
@@ -893,7 +908,7 @@ export function computeArmTips(star2D, face, params = {}) {
     // a peg aimed at `tipPosition` generally misses it.
     const hole2D = star2D.snapHoleCenters2D && star2D.snapHoleCenters2D[armIndex];
     const snapHolePosition = hole2D ? place(hole2D.x, hole2D.y) : null;
-    return { armIndex, tipPosition: p0, tipTangent: tangent, tipCurvature, snapHolePosition };
+    return { armIndex, tipPosition: p0, tipTangent: tangent, tipNormal, tipCurvature, snapHolePosition };
   });
 }
 
@@ -1428,7 +1443,20 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     const t = i / segments;
     const p = pointAt(t);
     const tangent = pointAt(Math.min(t + 1e-3, 1)).sub(pointAt(Math.max(t - 1e-3, 0))).normalize();
-    const radial = p.clone().normalize();
+    // Blend from the arm's own TRUE local surface normal at the tip (so
+    // the ribbon starts flush with the actual star surface instead of
+    // tilted off it - a sphere-radial approximation can be ~27 degrees off
+    // right where the exponential tip-bend curls the surface, which read
+    // as a visible kink/wedge exactly at the seam, independent of where
+    // `launchFrac` put the start point) to a sphere-radial approximation
+    // as the curve moves away from the tip into open space, where there's
+    // no arm surface left to reference. Blended over the first 35% of the
+    // curve - beyond that the connector is well clear of the star's own
+    // geometry and the coarser approximation is indistinguishable.
+    const blendT = Math.min(1, t / 0.35);
+    const sphereRadial = p.clone().normalize();
+    const radial = tip.tipNormal.clone().lerp(sphereRadial, blendT);
+    if (radial.lengthSq() < 1e-10) radial.copy(sphereRadial); else radial.normalize();
     const major = new THREE.Vector3().crossVectors(tangent, radial);
     if (major.lengthSq() < 1e-10) {
       major.set(Math.abs(tangent.x) < 0.9 ? 1 : 0, Math.abs(tangent.x) < 0.9 ? 0 : 1, 0);
@@ -1439,15 +1467,24 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     prevMajor = major;
     const minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
 
-    // Progressive Mobius-style twist around the tangent, ramping linearly
-    // from 0 at the tip (t=0) to `halfTwists` half-turns at the center (t=1).
-    const angle = halfTwists * Math.PI * t;
+    // Progressive Mobius-style twist around the tangent, eased in with
+    // zero value AND zero slope at the tip (t^2, the same onset shape the
+    // swirl envelope elsewhere in this file uses) so the cross-section
+    // doesn't immediately start rotating away from "flush with the
+    // surface" right at the seam - ramping to `halfTwists` half-turns by
+    // the shared center.
+    const angle = halfTwists * Math.PI * t * t;
     const cosA = Math.cos(angle);
     const sinA = Math.sin(angle);
     const rMajor = major.clone().multiplyScalar(cosA).addScaledVector(minor, sinA);
     const rMinor = minor.clone().multiplyScalar(cosA).addScaledVector(major, -sinA);
 
-    const halfW = THREE.MathUtils.lerp(startWidth, endWidth, t) / 2;
+    // Smoothstep (not linear) taper: stays close to full width longer near
+    // the tip - more coverage right where the ribbon meets the arm, per
+    // the request to make that junction read as "fused" rather than a
+    // sudden narrow stem - then narrows faster approaching the center.
+    const widthT = t * t * (3 - 2 * t);
+    const halfW = THREE.MathUtils.lerp(startWidth, endWidth, widthT) / 2;
     const c0 = p.clone().addScaledVector(rMajor, -halfW).addScaledVector(rMinor, -halfThick);
     const c1 = p.clone().addScaledVector(rMajor, halfW).addScaledVector(rMinor, -halfThick);
     const c2 = p.clone().addScaledVector(rMajor, halfW).addScaledVector(rMinor, halfThick);
