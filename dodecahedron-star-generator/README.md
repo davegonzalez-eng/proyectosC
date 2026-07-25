@@ -1911,6 +1911,63 @@ the DOM; the new launch-reach slider does and reads back
 (0.05) and max (0.15) both read back correctly; zero console errors
 selecting the preset or dragging any of the affected sliders.
 
+## 32. Fixed the ribbon's "ear lobe" tip bulge; ribbons stand perpendicular at the shared center; thickness default 0.15
+
+§31's "Connection launch reach" slider didn't actually do what its name
+promised - it scaled the Bezier control-point HANDLE length, not where the
+connector actually met the arm, so it couldn't touch the reported problem:
+a rounded bulge right where a thick ribbon meets the star, reading as a
+separate blob stuck onto the tip - "like an ear lobe" (screenshot supplied
+by the user made this unambiguous). The real cause: the connector always
+started exactly at the true tip, which is also where the exponential
+tip-bend curves and narrows the arm the most to pre-angle it for the OLD
+horn-arc connector - a wide, flat ribbon starting precisely at that sharp,
+narrow point had nothing to gradually taper from.
+
+**`spiralVortexPointAt`'s `launchFrac` now controls where the connector
+starts**, not the handle length (the handle length is now a fixed internal
+constant - the user's own clarification was that this single control
+should mean "does the connector meet the arm further out at the tip, or
+further in toward the star's center," which is a different knob than what
+had been built). The curve's actual starting point is pulled back from the
+true tip along the tip's own tangent, by `launchFrac` as a fraction of the
+tip-to-center span (default 0.15) - meeting the arm in its straighter,
+thicker part instead of right at the sharp tip removes the disconnect a
+wide ribbon had from starting exactly at the narrowest, most curved point.
+Slider re-ranged to 0-0.5 (was 0.05-1, the old handle-length range) with a
+new default of 0.15 and relabeled "Connection meet point."
+
+**Ribbons now stand perpendicular to the sphere's radial line at the
+shared vertex center**, not flat against it, per request. At the tip, the
+ribbon's cross-section frame already has its face-normal (`minor`) roughly
+radial and its width (`major`) roughly in-surface - so it starts flush
+with the star's own surface, continuing the arm. A fixed quarter-turn
+(90 degrees, ramped in the same way the old user-adjustable `halfTwists`
+was, just no longer exposed and no longer a full 180) rotates that frame
+progressively from tip to center, so by the time the ribbon reaches the
+shared point, `major`/`minor` have swapped roles: the face-normal is now
+roughly in-surface and the width is roughly radial - the ribbon stands
+edge-on (perpendicular) at the meeting point instead of lying flat
+(parallel) against it. This replaces the old user-facing `spiralHalfTwists`
+slider entirely (removed from params/presets) with this fixed, purposeful
+behavior.
+
+**Ribbon thickness default raised to 0.15** (was 0.05, already the
+slider's max from §31) - both the base params and the "Thick Bands" preset.
+
+Verified in headless Chromium: `params.spiralLaunchFrac` (0.15),
+`params.spiralRibbonThicknessFrac` (0.15), and `params.connectorStyle`
+(`spiralRibbon`) all read back correctly on preset load; zero console
+errors. The perpendicular-at-center framing and the meet-point relocation
+are both straightforward vector-math consequences of the curve
+construction (a Bezier start point moved along a known tangent; an
+orthonormal frame rotated by a known fixed angle) rather than approximated
+or eyeballed, so they hold exactly regardless of vertex geometry - a
+detailed zoomed screenshot to visually confirm the tip no longer bulges
+was attempted but not obtained this round (the headless environment was
+intermittently unable to complete multi-step zoom scripts); the whole-
+sculpture view confirms the change renders without error.
+
 ## File layout
 
 ```

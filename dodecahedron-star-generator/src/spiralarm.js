@@ -1246,11 +1246,24 @@ export function buildSnapHubGroup(tipA, tipB, tipC, params = {}) {
  * zero there regardless of `turns`/`sweepFrac`), not merely close.
  * @param {number} [options.direction=-1] rotation handedness; flip the sign
  *   to reverse which way the vortex spins.
- * @returns {(t: number) => THREE.Vector3} t in [0,1], tip at 0, center at 1
+ * @param {number} [options.launchFrac=0.15] where the connector actually
+ *   MEETS the arm, as a fraction of the tip-to-center distance pulled back
+ *   from the true tip along the tip's own outward tangent - 0 meets right
+ *   at the true tip, larger values meet further in toward the star's
+ *   center. The true tip is where the arm's cross-section is narrowest and
+ *   most sharply curved (the exponential tip-bend that pre-angles it to
+ *   meet a connector) - starting a wide connector, especially a flat
+ *   ribbon, exactly there read as a separate bulge stuck onto the end of
+ *   the arm ("ear lobe", reported after shipping); meeting it a little
+ *   further back, in the arm's straighter part, reads as a continuation of
+ *   the arm instead of an add-on.
+ * @returns {(t: number) => THREE.Vector3} t in [0,1], meet point at 0, center at 1
  */
 export function spiralVortexPointAt(tip, center, options = {}) {
-  const { turns = 0.65, sweepFrac = 0.4, launchFrac = 0.4, direction = -1 } = options;
-  const P = tip.tipPosition.clone();
+  const { turns = 0.65, sweepFrac = 0.4, launchFrac = 0.15, direction = -1 } = options;
+  const trueTip = tip.tipPosition;
+  const trueAxisLen = center.distanceTo(trueTip);
+  const P = trueTip.clone().addScaledVector(tip.tipTangent, launchFrac * trueAxisLen);
   const C = center.clone();
   const axis = C.clone().sub(P);
   const axisLen = axis.length();
@@ -1264,7 +1277,12 @@ export function spiralVortexPointAt(tip, center, options = {}) {
   e1.normalize();
   const e2 = new THREE.Vector3().crossVectors(axis, e1).normalize();
 
-  const M = P.clone().addScaledVector(tip.tipTangent, axisLen * launchFrac);
+  // Bezier handle length (how far the curve keeps going in the tip's own
+  // direction before bending toward center) - a fixed fraction of the
+  // (possibly shortened, if `launchFrac` pulled the start point in)
+  // remaining span. No longer separately user-exposed since `launchFrac`
+  // now controls where the curve STARTS rather than how its handle scales.
+  const M = P.clone().addScaledVector(tip.tipTangent, axisLen * 0.4);
   const base = (t) => {
     const mt = 1 - t;
     return P.clone().multiplyScalar(mt * mt)
@@ -1343,7 +1361,7 @@ function buildSpiralVortexArm(tip, center, options = {}) {
  * @returns {THREE.Group}
  */
 export function buildSpiralVortexGroup(tipA, tipB, tipC, params = {}) {
-  const { R = 1, spiralTurns = 0.65, spiralSweepFrac = 0.4, spiralLaunchFrac = 0.4, spiralArcWidthFrac = 0.035 } = params;
+  const { R = 1, spiralTurns = 0.65, spiralSweepFrac = 0.4, spiralLaunchFrac = 0.15, spiralArcWidthFrac = 0.035 } = params;
   const center = hornTriangleCenter(tipA, tipB, tipC);
   const group = new THREE.Group();
   const startRadius = R * spiralArcWidthFrac;
@@ -1389,7 +1407,15 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     startWidth = 0.08,
     endWidthFrac = 0.35,
     thickness = 0.012,
-    halfTwists = 0,
+    // Fixed quarter-turn (not user-exposed): at the tip the ribbon's flat
+    // face lies roughly tangent to the sphere (face normal ~radial, so the
+    // ribbon reads as flush with the surface, continuing the arm); ramping
+    // a 90-degree twist in by the time it reaches the shared center flips
+    // that so the face normal ends up roughly tangent instead - the ribbon
+    // stands edge-on (perpendicular) to the line from the sphere's center
+    // through the meeting point there, per request, rather than lying
+    // flat (parallel) against it the way the un-twisted frame would.
+    halfTwists = 0.5,
   } = options;
   const pointAt = spiralVortexPointAt(tip, center, options);
   const endWidth = startWidth * endWidthFrac;
@@ -1453,10 +1479,9 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
     R = 1,
     spiralTurns = 0.65,
     spiralSweepFrac = 0.4,
-    spiralLaunchFrac = 0.4,
+    spiralLaunchFrac = 0.15,
     spiralRibbonWidthFrac = 0.09,
     spiralRibbonThicknessFrac = 0.012,
-    spiralHalfTwists = 1,
   } = params;
   const center = hornTriangleCenter(tipA, tipB, tipC);
   const group = new THREE.Group();
@@ -1469,7 +1494,8 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
       launchFrac: spiralLaunchFrac,
       startWidth,
       thickness,
-      halfTwists: spiralHalfTwists,
+      // halfTwists intentionally omitted - always the function's own fixed
+      // quarter-turn (see buildSpiralVortexRibbonArm), not user-adjustable.
     });
     group.add(new THREE.Mesh(geom));
   }

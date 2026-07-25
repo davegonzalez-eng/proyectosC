@@ -285,23 +285,25 @@ const params = {
   // swoop into the center instead of a visible coil.
   spiralTurns: 0.22,
   spiralSweepFrac: 0.22,
-  // How far the connector curve's Bezier control point sits along the
-  // tip's own outward tangent (as a fraction of the tip-to-center
-  // distance) before the curve bends in toward the shared center - governs
-  // how long the connector keeps going in the tip's own direction before
-  // it starts visibly curving away, i.e. how far from the star the
-  // "departure" reads as happening. Was hardcoded inside
-  // `spiralVortexPointAt` (never actually reachable through `params`,
-  // despite being destructured from `options` there) - exposed here so the
-  // "connections meet the star closer/farther" control actually works.
-  spiralLaunchFrac: 0.4,
+  // Where the connector actually MEETS the arm, as a fraction of the
+  // tip-to-center distance pulled back from the true tip along the tip's
+  // own outward tangent - 0 meets right at the true tip, larger values
+  // meet further in toward the star's center. The true tip is where the
+  // arm is narrowest and most sharply curved (the exponential tip-bend
+  // that pre-angles it to meet a connector); starting a wide connector
+  // exactly there read as a separate bulge stuck onto the end of the arm
+  // ("ear lobe", reported after shipping) - meeting it a little further
+  // back, in the arm's straighter part, reads as a continuation of the arm
+  // instead of an add-on.
+  spiralLaunchFrac: 0.15,
   spiralArcWidthFrac: 0.035,
   // Star Odyssey "thick bands" connector shape: same spiral curve as
-  // above, extruded as a flat ribbon instead of a tapering tube, with a
-  // progressive twist (in half-turns) applied along its length.
+  // above, extruded as a flat ribbon instead of a tapering tube. The
+  // ribbon's progressive quarter-turn twist (so it stands perpendicular to
+  // the sphere's radial line at the shared center, instead of lying flat
+  // against it) is fixed in `buildSpiralVortexRibbonArm`, not a param here.
   spiralRibbonWidthFrac: 0.09,
   spiralRibbonThicknessFrac: 0.012,
-  spiralHalfTwists: 1,
 };
 
 // Three named parameter bundles, applied wholesale via setParams() from the
@@ -420,9 +422,10 @@ const PRESETS = {
   // Same star shape as `odysseyThicker` - the brief here was specifically
   // to change the CONNECTOR's cross-section, not the stars again - but
   // `connectorStyle: 'spiralRibbon'` extrudes each spiral as a flat, wide
-  // band instead of a tapering tube, with a half-twist (Mobius-strip
-  // style) along its length as it leaves the arm and spirals in to meet
-  // the other two bands at the shared vertex center.
+  // band instead of a tapering tube, with a fixed quarter-turn (Mobius-
+  // strip style) along its length so each band stands perpendicular to
+  // the sphere's radial line at the shared vertex center, instead of lying
+  // flat against it.
   odysseyThickBands: {
     starRotationDeg: 14, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.14,
     bandHalfWidth: 0.305, tipWidthFrac: 0.57, widthTaperPower: 0.9,
@@ -433,7 +436,7 @@ const PRESETS = {
     fieldGrid: 144,
     singleFaceMode: false, connectorStyle: 'spiralRibbon', snapEnabled: false,
     spiralTurns: 0.1, spiralSweepFrac: 0.02,
-    spiralRibbonWidthFrac: 0.09, spiralRibbonThicknessFrac: 0.05, spiralHalfTwists: 1,
+    spiralRibbonWidthFrac: 0.09, spiralRibbonThicknessFrac: 0.15,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: false, lampIntensity: 19,
   },
@@ -1118,7 +1121,7 @@ const PRESET_HINTS = {
   print3d: 'One detailed face at a time, sized for a real print - peg + socket friction-fit joints (small hub piece per vertex) instead of the fused horn arc. Pick which face with the slider below.',
   starOdyssey: "Same stars as #1, but every horn-triangle arc is replaced by a 3-way spiral funnel converging at that vertex's center.",
   odysseyThicker: 'Star Odyssey with wider, chunkier tips and a smaller hub - a second live-tuned variant.',
-  odysseyThickBands: 'Star Odyssey with the spiral connectors as flat, wide ribbons instead of tapered tubes, with a half-twist along each band as it leaves the arm and spirals in to meet the other two.',
+  odysseyThickBands: 'Star Odyssey with the spiral connectors as flat, wide ribbons instead of tapered tubes, standing perpendicular to the sphere at the shared vertex center where the three bands meet.',
 };
 // Each connector style has its own shape sliders (the horn arc's
 // length/depth/clothoid params mean nothing to the spiral vortex, and vice
