@@ -784,7 +784,45 @@ export function mapArmCenterlineWithNormal(star2D, face, armIndex, params = {}) 
  * UV = (u, w) world coordinates. Also returns each arm's world tip
  * position/tangent for building extensions.
  */
-export function mapSolidStarToFace(star2D, face, params = {}) {
+/**
+ * Drops triangles from a (positions, indices) mesh whose centroid lies
+ * beyond a cutting plane, gated to just the region within `gateRadius` of
+ * `gateCenter` - so the (infinite) plane test never touches unrelated
+ * geometry elsewhere in the same combined buffer (the hub, other arms)
+ * even when it would technically fall on the "cut" side of the plane.
+ * Used to stop the star's own arm surface from being drawn where a
+ * `spiralRibbon` connector has already taken over that same span.
+ */
+function trimTrianglesPastPlane(positions, indices, planePoint, planeNormal, gateCenter, gateRadius) {
+  const vCount = positions.length / 3;
+  const gateRadiusSq = gateRadius * gateRadius;
+  const keep = new Uint8Array(vCount);
+  const v = new THREE.Vector3();
+  const rel = new THREE.Vector3();
+  for (let i = 0; i < vCount; i++) {
+    v.set(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+    if (v.distanceToSquared(gateCenter) > gateRadiusSq) { keep[i] = 1; continue; }
+    rel.copy(v).sub(planePoint);
+    keep[i] = rel.dot(planeNormal) <= 0 ? 1 : 0;
+  }
+  const out = [];
+  for (let t = 0; t < indices.length; t += 3) {
+    const a = indices[t], b = indices[t + 1], c = indices[t + 2];
+    if (keep[a] && keep[b] && keep[c]) out.push(a, b, c);
+  }
+  return out;
+}
+
+/**
+ * @param {Array<{point: THREE.Vector3, normal: THREE.Vector3, gateCenter: THREE.Vector3, gateRadius: number}|null>} [armTrims]
+ *   Per-arm (indexed by armIndex) cut plane - vertices past `point` along
+ *   `normal`, within `gateRadius` of `gateCenter`, are dropped. Used by the
+ *   `spiralRibbon` connector style so the star's own arm surface stops
+ *   where the connector's own geometry has already taken over that span
+ *   (reported as visible gaps/mismatch between the two overlapping,
+ *   non-identical surfaces otherwise).
+ */
+export function mapSolidStarToFace(star2D, face, params = {}, armTrims = null) {
   const { thickness = 0.015 } = params;
 
   const R = star2D.R;
@@ -842,10 +880,18 @@ export function mapSolidStarToFace(star2D, face, params = {}) {
     arc += seg;
   }
 
+  let finalIndices = indices;
+  if (armTrims) {
+    for (const trim of armTrims) {
+      if (!trim) continue;
+      finalIndices = trimTrianglesPastPlane(positions, finalIndices, trim.point, trim.normal, trim.gateCenter, trim.gateRadius);
+    }
+  }
+
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
-  geometry.setIndex(indices);
+  geometry.setIndex(finalIndices);
   geometry.computeVertexNormals();
 
   const arms = computeArmTips(star2D, face, params);
@@ -1509,6 +1555,14 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
       indices.push(s0, s2, s1, s1, s2, s3);
     }
   }
+  // Cap the start (t=0) end - left open it's a hollow rectangular tube, and
+  // wherever the ribbon doesn't perfectly cover the star's own arm surface
+  // underneath it (unavoidable with a simple 4-vertex cross-section against
+  // a curved, perforated mesh), a gap lets you see straight into that
+  // opening, reading as "the connector end looks like a hollow rectangle"
+  // rather than solid material (`rimMaterial` is double-sided, so winding
+  // direction doesn't matter for visibility).
+  indices.push(0, 1, 2, 0, 2, 3);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setIndex(indices);

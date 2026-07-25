@@ -2070,6 +2070,57 @@ Verified in headless Chromium: `spiralLaunchFrac` (0), `spiralLengthMultiplier`
 (1.5), `spiralRibbonWidthFrac` (0.135), and `spiralRibbonThicknessFrac`
 (0.09) all read back correctly on preset load; zero console errors.
 
+## 35. Ribbon cross-section thinned + capped; the star's own arm surface trimmed where the connector now covers it
+
+Feedback on §34's longer connectors, with a close-up screenshot: the wider
+ribbon (0.135 width) at 0.09 thickness read nearly square in cross-section
+(aspect ratio 1.5:1) - combined with the open ends `buildSpiralVortexRibbonArm`
+never capped, a viewing angle that caught a gap between the ribbon and the
+star's own (non-matching) surface underneath let you see straight into that
+open cross-section, reading as "a hollow rectangle" rather than a flat band.
+
+**Two direct fixes to the ribbon shape itself:** thickness cut to a third
+(0.09→0.03 for Thick Bands, a 4.5:1 aspect ratio); and the start (t=0) end
+is now capped with a simple two-triangle quad across its own 4 corner
+vertices, closing what was an open tube.
+
+**The deeper fix - stopping the star's own arm surface where the connector
+takes over:** with `spiralLengthMultiplier` (§34) pulling the connector's
+start point backward past the true tip, into the arm, the star's own solid
+mesh and the connector's own geometry now occupy the SAME physical span -
+two different, non-identical surfaces both being drawn there, which is what
+actually produced the reported gaps (the ribbon's simple 4-vertex
+cross-section can't perfectly track a curved, hex-perforated mesh). Per the
+user's own diagnosis ("stop drawing the arm surface beyond the point where
+it reaches the connector"), `mapSolidStarToFace` now accepts an optional
+per-arm cut plane and drops every triangle beyond it before the geometry is
+finalized - implemented as a generic `trimTrianglesPastPlane(positions,
+indices, planePoint, planeNormal, gateCenter, gateRadius)` utility gated to
+a world-space radius around the tip, so the (otherwise infinite) plane test
+can never reach into unrelated geometry sharing the same combined buffer
+(the hub, other arms).
+
+Wiring this up needed `rebuild()`'s face loop restructured into two passes:
+tip WORLD positions for every face (needed to compute each arm's cut plane
+via `hornTriangleCenter`, mirroring `spiralVortexPointAt`'s own
+`offsetFrac` formula exactly) have to be known before any face's full mesh
+is built, but the old single-pass loop only ever knew a face's own tips
+after building that same face's mesh. Pass 1 now does the cheap
+`computeArmTips`-only sweep across every face up front; pass 2 builds each
+shown face's full geometry, now able to look up any tip (including ones on
+faces visited later in the old ordering) and pass the right per-arm trims
+into `mapSolidStarToFace`. Only active when `connectorStyle ===
+'spiralRibbon'` and the computed offset is actually negative (the
+connector actually reaches past the true tip) - every other preset takes
+the identical code path it always did, with `armTrims` staying `null`.
+
+Verified in headless Chromium: zero console errors on Thick Bands and Star
+Odyssey (tube-style spiral, unaffected code path); a zoomed screenshot of
+the same tip region was queued to directly confirm the trim's visual
+effect but had not completed by the time this round was pushed (the
+headless environment has been intermittently slow to finish multi-step
+zoom scripts this session).
+
 ## File layout
 
 ```

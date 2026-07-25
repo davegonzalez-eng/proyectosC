@@ -449,7 +449,11 @@ const PRESETS = {
     // the arm, per request ("go further within the star arm... fuse more
     // aggressively in a co-planar way").
     spiralLengthMultiplier: 1.5,
-    spiralRibbonWidthFrac: 0.135, spiralRibbonThicknessFrac: 0.09,
+    // Thickness cut to a third of its previous value (0.09->0.03) - at
+    // 0.135 width it was reading nearly square, which combined with the
+    // ribbon's open ends (see buildSpiralVortexRibbonArm's end cap) looked
+    // like "a hollow rectangle" rather than a flat band.
+    spiralRibbonWidthFrac: 0.135, spiralRibbonThicknessFrac: 0.03,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: false, lampIntensity: 19,
   },
@@ -897,10 +901,57 @@ function rebuild() {
   /** @type {Map<string, {tipPosition: THREE.Vector3, tipTangent: THREE.Vector3}>} */
   const tipsByLabel = new Map();
 
+  // Cheap tip-only pass for EVERY face, up front - needed before any full
+  // mesh is built so `armTrimsByFace` below (which needs every tip's world
+  // position, including tips on faces this loop hasn't reached yet) can be
+  // computed first. Full per-face meshes overwrite nothing here; they just
+  // reuse `arms` off `mapSolidStarToFace`'s own return, which is the same
+  // data computed the same way.
+  for (const face of faces) {
+    for (const arm of computeArmTips(star2D, face, params)) {
+      tipsByLabel.set(`F${face.index}-A${arm.armIndex}`, arm);
+    }
+  }
+
+  // Star Odyssey - Thick Bands: work out, for every arm tip, how far back
+  // into the arm the `spiralRibbon` connector now reaches (mirroring
+  // `spiralVortexPointAt`'s own `offsetFrac` math exactly) - if it reaches
+  // PAST the true tip, into the arm's own solid material, build a cut
+  // plane so that arm's own geometry stops there instead of doubling up
+  // with the connector's non-matching surface (reported as visible gaps).
+  /** @type {Map<number, Array<{point: THREE.Vector3, normal: THREE.Vector3, gateCenter: THREE.Vector3, gateRadius: number}|null>>} */
+  const armTrimsByFace = new Map();
+  if (params.showExtensions && params.connectorStyle === 'spiralRibbon') {
+    const offsetFrac = params.spiralLaunchFrac - (params.spiralLengthMultiplier - 1);
+    if (offsetFrac < 0) {
+      for (const triple of threeCycles) {
+        const tips = triple.map((label) => tipsByLabel.get(label));
+        if (tips.some((t) => !t)) continue;
+        const center = hornTriangleCenter(tips[0], tips[1], tips[2]);
+        for (let i = 0; i < 3; i++) {
+          const tip = tips[i];
+          const faceIdx = +triple[i].slice(1, triple[i].indexOf('-'));
+          const armIdx = tip.armIndex;
+          const trueAxisLen = tip.tipPosition.distanceTo(center);
+          const point = tip.tipPosition.clone().addScaledVector(tip.tipTangent, offsetFrac * trueAxisLen);
+          const trimDist = -offsetFrac * trueAxisLen;
+          if (!armTrimsByFace.has(faceIdx)) armTrimsByFace.set(faceIdx, [null, null, null, null, null]);
+          armTrimsByFace.get(faceIdx)[armIdx] = {
+            point,
+            normal: tip.tipTangent.clone(),
+            gateCenter: tip.tipPosition.clone(),
+            gateRadius: trimDist * 1.3,
+          };
+        }
+      }
+    }
+  }
+
   for (const face of faces) {
     const isShown = !params.singleFaceMode || face.index === params.singleFaceIndex;
     if (isShown) {
-      const { geometry, arms } = mapSolidStarToFace(star2D, face, params);
+      const armTrims = armTrimsByFace.get(face.index) || null;
+      const { geometry } = mapSolidStarToFace(star2D, face, params, armTrims);
       const starMesh = new THREE.Mesh(geometry, sculptureMaterial);
       starMesh.userData.faceIndex = face.index;
       starGroup.add(starMesh);
@@ -910,18 +961,6 @@ function rebuild() {
         const rimMesh = new THREE.Mesh(rimGeom, rimMaterial);
         rimMesh.userData.faceIndex = face.index;
         rimGroup.add(rimMesh);
-      }
-
-      for (const arm of arms) tipsByLabel.set(`F${face.index}-A${arm.armIndex}`, arm);
-    } else {
-      // Single-face mode: this face's own mesh/rim aren't rendered, but its
-      // tip positions/tangents are still needed - other faces' snap-hub
-      // pieces (or, outside single-face mode, the horn-arc/spiral
-      // connectors) reference tips across face boundaries. `computeArmTips`
-      // gets just that, skipping the full top/bottom-sheet + wall vertex
-      // build this face doesn't need.
-      for (const arm of computeArmTips(star2D, face, params)) {
-        tipsByLabel.set(`F${face.index}-A${arm.armIndex}`, arm);
       }
     }
   }
