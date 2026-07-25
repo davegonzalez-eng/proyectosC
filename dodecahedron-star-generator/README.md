@@ -1875,6 +1875,42 @@ Bands) load with zero console errors; the two coral patterns' raw canvas
 output was checked standalone against the reference photo before and after
 the warp-amplitude fix.
 
+## 31. Thick Bands follow-up: thicker default, a connector launch-distance control, decluttered sliders
+
+**Ribbon thickness default raised to 0.05** (from 0.012), slider range
+extended to 0.15 (was 0.03) - the user's own feedback after seeing the
+first Thick Bands render.
+
+**New "Connection launch reach" slider**, addressing a reported
+protuberance ("like an ear lobe") right where a connector meets the star,
+and a request for a control to move that meeting point closer to or
+farther from the star. `spiralVortexPointAt`'s quadratic-Bezier control
+point is placed along the tip's own outward tangent, scaled by
+`axisLen * launchFrac` - a LARGER `launchFrac` keeps the connector
+continuing in the tip's own direction longer before bending toward the
+shared center (reads as departing farther from the star before curving
+in); a SMALLER one bends toward center almost immediately (reads as
+attaching closer). This was already a real parameter inside
+`spiralVortexPointAt` (default 0.4) but neither `buildSpiralVortexGroup`
+nor `buildSpiralVortexRibbonGroup` ever forwarded anything into it from
+`params` - it was permanently stuck at its hardcoded default with no way
+to reach it from the UI. Added `spiralLaunchFrac` to `params`, threaded it
+through both group-builders into the `launchFrac` option, and exposed it
+as a slider shared by both spiral connector styles (it shapes the same
+underlying curve either draws).
+
+**Removed the "Spiral turns" and "Half-twists" sliders** - both connector
+styles keep whatever value their preset sets, just no longer live-
+adjustable from the panel. `spiralCurveControls` now holds only "Spiral
+sweep" and the new "Connection launch reach"; `spiralRibbonControls` holds
+only "Ribbon width" and "Ribbon thickness".
+
+Verified in headless Chromium: the two removed sliders no longer exist in
+the DOM; the new launch-reach slider does and reads back
+`params.spiralLaunchFrac` correctly; the thickness slider's new default
+(0.05) and max (0.15) both read back correctly; zero console errors
+selecting the preset or dragging any of the affected sliders.
+
 ## File layout
 
 ```

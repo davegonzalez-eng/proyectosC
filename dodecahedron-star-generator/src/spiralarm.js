@@ -1343,7 +1343,7 @@ function buildSpiralVortexArm(tip, center, options = {}) {
  * @returns {THREE.Group}
  */
 export function buildSpiralVortexGroup(tipA, tipB, tipC, params = {}) {
-  const { R = 1, spiralTurns = 0.65, spiralSweepFrac = 0.4, spiralArcWidthFrac = 0.035 } = params;
+  const { R = 1, spiralTurns = 0.65, spiralSweepFrac = 0.4, spiralLaunchFrac = 0.4, spiralArcWidthFrac = 0.035 } = params;
   const center = hornTriangleCenter(tipA, tipB, tipC);
   const group = new THREE.Group();
   const startRadius = R * spiralArcWidthFrac;
@@ -1351,6 +1351,7 @@ export function buildSpiralVortexGroup(tipA, tipB, tipC, params = {}) {
     const geom = buildSpiralVortexArm(tip, center, {
       turns: spiralTurns,
       sweepFrac: spiralSweepFrac,
+      launchFrac: spiralLaunchFrac,
       startRadius,
     });
     group.add(new THREE.Mesh(geom));
@@ -1452,6 +1453,7 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
     R = 1,
     spiralTurns = 0.65,
     spiralSweepFrac = 0.4,
+    spiralLaunchFrac = 0.4,
     spiralRibbonWidthFrac = 0.09,
     spiralRibbonThicknessFrac = 0.012,
     spiralHalfTwists = 1,
@@ -1464,6 +1466,7 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
     const geom = buildSpiralVortexRibbonArm(tip, center, {
       turns: spiralTurns,
       sweepFrac: spiralSweepFrac,
+      launchFrac: spiralLaunchFrac,
       startWidth,
       thickness,
       halfTwists: spiralHalfTwists,

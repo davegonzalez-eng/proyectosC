@@ -285,6 +285,16 @@ const params = {
   // swoop into the center instead of a visible coil.
   spiralTurns: 0.22,
   spiralSweepFrac: 0.22,
+  // How far the connector curve's Bezier control point sits along the
+  // tip's own outward tangent (as a fraction of the tip-to-center
+  // distance) before the curve bends in toward the shared center - governs
+  // how long the connector keeps going in the tip's own direction before
+  // it starts visibly curving away, i.e. how far from the star the
+  // "departure" reads as happening. Was hardcoded inside
+  // `spiralVortexPointAt` (never actually reachable through `params`,
+  // despite being destructured from `options` there) - exposed here so the
+  // "connections meet the star closer/farther" control actually works.
+  spiralLaunchFrac: 0.4,
   spiralArcWidthFrac: 0.035,
   // Star Odyssey "thick bands" connector shape: same spiral curve as
   // above, extruded as a flat ribbon instead of a tapering tube, with a
@@ -423,7 +433,7 @@ const PRESETS = {
     fieldGrid: 144,
     singleFaceMode: false, connectorStyle: 'spiralRibbon', snapEnabled: false,
     spiralTurns: 0.1, spiralSweepFrac: 0.02,
-    spiralRibbonWidthFrac: 0.09, spiralRibbonThicknessFrac: 0.012, spiralHalfTwists: 1,
+    spiralRibbonWidthFrac: 0.09, spiralRibbonThicknessFrac: 0.05, spiralHalfTwists: 1,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: false, lampIntensity: 19,
   },
@@ -1037,12 +1047,11 @@ bindSlider('extLengthFactor', 'extLengthFactor');
 bindSlider('extDepthFraction', 'extDepthFraction');
 bindSlider('extArcWidthFrac', 'extArcWidthFrac');
 bindSlider('extClothoid', 'extClothoid');
-bindSlider('spiralTurns', 'spiralTurns');
 bindSlider('spiralSweepFrac', 'spiralSweepFrac');
+bindSlider('spiralLaunchFrac', 'spiralLaunchFrac');
 bindSlider('spiralArcWidthFrac', 'spiralArcWidthFrac');
 bindSlider('spiralRibbonWidthFrac', 'spiralRibbonWidthFrac');
 bindSlider('spiralRibbonThicknessFrac', 'spiralRibbonThicknessFrac');
-bindSlider('spiralHalfTwists', 'spiralHalfTwists');
 bindSlider('rimWidthFrac', 'rimWidthFrac');
 bindSlider('rimProudFrac', 'rimProudFrac');
 bindSlider('holeSize', 'holeSize', { appearanceOnly: true });
