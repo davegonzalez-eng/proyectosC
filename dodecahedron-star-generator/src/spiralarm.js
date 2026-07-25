@@ -1272,13 +1272,22 @@ export function buildSnapHubGroup(tipA, tipB, tipC, params = {}) {
  *   the arm ("ear lobe", reported after shipping); meeting it a little
  *   further back, in the arm's straighter part, reads as a continuation of
  *   the arm instead of an add-on.
+ * @param {number} [options.lengthMultiplier=1] extends the connector
+ *   BACKWARD past the true tip, into the arm toward the hub, so its total
+ *   tip-to-center span is this many times the arm's own true tip-to-center
+ *   distance - "fusing" further into the arm's own surface rather than
+ *   just meeting at (or near) the tip. Composes with `launchFrac`: a
+ *   `launchFrac` of 0 and a `lengthMultiplier` of 1.5 starts the connector
+ *   0.5x the tip-to-center span further back into the arm than the true
+ *   tip itself.
  * @returns {(t: number) => THREE.Vector3} t in [0,1], meet point at 0, center at 1
  */
 export function spiralVortexPointAt(tip, center, options = {}) {
-  const { turns = 0.65, sweepFrac = 0.4, launchFrac = 0.15, direction = -1 } = options;
+  const { turns = 0.65, sweepFrac = 0.4, launchFrac = 0.15, lengthMultiplier = 1, direction = -1 } = options;
   const trueTip = tip.tipPosition;
   const trueAxisLen = center.distanceTo(trueTip);
-  const P = trueTip.clone().addScaledVector(tip.tipTangent, launchFrac * trueAxisLen);
+  const offsetFrac = launchFrac - (lengthMultiplier - 1);
+  const P = trueTip.clone().addScaledVector(tip.tipTangent, offsetFrac * trueAxisLen);
   const C = center.clone();
   const axis = C.clone().sub(P);
   const axisLen = axis.length();
@@ -1376,7 +1385,7 @@ function buildSpiralVortexArm(tip, center, options = {}) {
  * @returns {THREE.Group}
  */
 export function buildSpiralVortexGroup(tipA, tipB, tipC, params = {}) {
-  const { R = 1, spiralTurns = 0.65, spiralSweepFrac = 0.4, spiralLaunchFrac = 0.15, spiralArcWidthFrac = 0.035 } = params;
+  const { R = 1, spiralTurns = 0.65, spiralSweepFrac = 0.4, spiralLaunchFrac = 0.15, spiralLengthMultiplier = 1, spiralArcWidthFrac = 0.035 } = params;
   const center = hornTriangleCenter(tipA, tipB, tipC);
   const group = new THREE.Group();
   const startRadius = R * spiralArcWidthFrac;
@@ -1385,6 +1394,7 @@ export function buildSpiralVortexGroup(tipA, tipB, tipC, params = {}) {
       turns: spiralTurns,
       sweepFrac: spiralSweepFrac,
       launchFrac: spiralLaunchFrac,
+      lengthMultiplier: spiralLengthMultiplier,
       startRadius,
     });
     group.add(new THREE.Mesh(geom));
@@ -1517,6 +1527,7 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
     spiralTurns = 0.65,
     spiralSweepFrac = 0.4,
     spiralLaunchFrac = 0.15,
+    spiralLengthMultiplier = 1,
     spiralRibbonWidthFrac = 0.09,
     spiralRibbonThicknessFrac = 0.012,
   } = params;
@@ -1529,6 +1540,7 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
       turns: spiralTurns,
       sweepFrac: spiralSweepFrac,
       launchFrac: spiralLaunchFrac,
+      lengthMultiplier: spiralLengthMultiplier,
       startWidth,
       thickness,
       // halfTwists intentionally omitted - always the function's own fixed

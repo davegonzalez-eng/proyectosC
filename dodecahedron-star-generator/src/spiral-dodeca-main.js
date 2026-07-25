@@ -296,6 +296,11 @@ const params = {
   // back, in the arm's straighter part, reads as a continuation of the arm
   // instead of an add-on.
   spiralLaunchFrac: 0.15,
+  // How much longer than the arm's own true tip-to-center distance the
+  // connector is, extending BACKWARD past the true tip into the arm
+  // toward the hub - "fusing" further into the arm's own surface rather
+  // than just meeting at (or near) the tip.
+  spiralLengthMultiplier: 1,
   spiralArcWidthFrac: 0.035,
   // Star Odyssey "thick bands" connector shape: same spiral curve as
   // above, extruded as a flat ribbon instead of a tapering tube. The
@@ -435,8 +440,16 @@ const PRESETS = {
     showExtensions: true, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
     fieldGrid: 144,
     singleFaceMode: false, connectorStyle: 'spiralRibbon', snapEnabled: false,
-    spiralTurns: 0.1, spiralSweepFrac: 0.02,
-    spiralRibbonWidthFrac: 0.09, spiralRibbonThicknessFrac: 0.15,
+    spiralTurns: 0.1, spiralSweepFrac: 0.02, spiralLaunchFrac: 0,
+    // Now that the ribbon's frame uses the arm's own true surface normal
+    // near the tip (see buildSpiralVortexRibbonArm), meeting exactly at
+    // the true tip (launchFrac: 0) reads clean rather than needing an
+    // inset to hide a normal mismatch - `lengthMultiplier` instead extends
+    // the connector 1.5x past the true tip-to-center span, backward into
+    // the arm, per request ("go further within the star arm... fuse more
+    // aggressively in a co-planar way").
+    spiralLengthMultiplier: 1.5,
+    spiralRibbonWidthFrac: 0.135, spiralRibbonThicknessFrac: 0.09,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: false, lampIntensity: 19,
   },
@@ -1052,6 +1065,7 @@ bindSlider('extArcWidthFrac', 'extArcWidthFrac');
 bindSlider('extClothoid', 'extClothoid');
 bindSlider('spiralSweepFrac', 'spiralSweepFrac');
 bindSlider('spiralLaunchFrac', 'spiralLaunchFrac');
+bindSlider('spiralLengthMultiplier', 'spiralLengthMultiplier');
 bindSlider('spiralArcWidthFrac', 'spiralArcWidthFrac');
 bindSlider('spiralRibbonWidthFrac', 'spiralRibbonWidthFrac');
 bindSlider('spiralRibbonThicknessFrac', 'spiralRibbonThicknessFrac');

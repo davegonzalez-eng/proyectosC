@@ -2031,6 +2031,45 @@ round was pushed (the headless environment has been intermittently slow
 to finish multi-step zoom scripts this session) - visual confirmation that
 the bulge is actually gone is still outstanding.
 
+The delayed zoom screenshot did land later in the same session (a
+background task that finally finished): the reported bulge is gone in the
+same tip region - the ribbons read as continuous flowing bands into the
+star surface instead of a separate wedge stuck onto the end.
+
+## 34. Thick Bands preset retuned again; connectors now reach 1.5x further into the arm
+
+Another live-tuned settings-table export, plus a new "how far into the arm
+does the connector reach" control. `spiralLaunchFrac` moved back to 0 (the
+true tip) - with §33's true-surface-normal fix in place, meeting exactly at
+the tip reads clean now, so the inset that used to paper over the frame
+mismatch isn't needed. `spiralRibbonWidthFrac` 0.09→0.135,
+`spiralRibbonThicknessFrac` 0.15→0.09.
+
+**New `spiralLengthMultiplier`** extends the connector backward PAST the
+true tip, into the arm toward the hub, so its total tip-to-center span is
+this many times the arm's own true tip-to-center distance - directly
+addressing "make the connections longer... by going further within the
+star arm, fusing more aggressively in a co-planar way with the star arm."
+Composes with `launchFrac` inside `spiralVortexPointAt`: the connector's
+start point is now `trueTip + tangent * (launchFrac - (lengthMultiplier -
+1)) * trueAxisLen` - at the Thick Bands preset's `launchFrac: 0` and
+`lengthMultiplier: 1.5`, that starts the connector 0.5x the tip-to-center
+span further back into the arm than the true tip itself. The existing
+true-surface-normal blend (§33) - which keeps the ribbon's frame matched
+to the arm's actual surface near the start rather than a cruder
+sphere-radial approximation - carries over unchanged and now covers this
+longer embedded stretch too, since it's keyed off the curve's own
+parameter `t` rather than a fixed absolute distance.
+
+New "Connection length (x tip-to-center span)" slider, ranged 1-2 (default
+1 elsewhere, 1.5 for Thick Bands) alongside the existing meet-point
+control, both shown for either spiral connector style since they shape the
+shared underlying curve.
+
+Verified in headless Chromium: `spiralLaunchFrac` (0), `spiralLengthMultiplier`
+(1.5), `spiralRibbonWidthFrac` (0.135), and `spiralRibbonThicknessFrac`
+(0.09) all read back correctly on preset load; zero console errors.
+
 ## File layout
 
 ```
