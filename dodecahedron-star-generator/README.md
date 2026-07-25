@@ -1655,6 +1655,71 @@ same sweep after the fix shows real geometry everywhere, including the
 unchanged. A 6-second real-timing run (actual checkbox toggle, no debug
 time-injection) at the new 0.03 default produced zero console errors.
 
+## 27. Connector checkbox actually gates every style; hub/peg pieces stop shooting off-screen; gentler spiral defaults
+
+Three more rounds of feedback on §25/§26, all traced back to the same root
+cause: the "Show horn arcs" checkbox (renamed "Show connectors") had been
+extended to gate all three connector styles' code paths, but the `print3d`
+and `starOdyssey` preset bundles themselves still set `showExtensions:
+false` - a leftover from BEFORE the styles were unified under one flag, back
+when `snapHub`/`spiralVortex` ran unconditionally regardless of the
+checkbox. Once the gating was fixed, that leftover `false` meant the hub/peg
+pieces and spiral funnels - each preset's entire reason for existing -
+never built at all. Both presets now default `showExtensions: true`.
+
+**Why this looked like three unrelated bugs.** With the connectors silently
+never built, screenshots of "the hub/peg sizing" were actually only showing
+the socket holes (a separate CSG cut into the star's own geometry,
+independent of `showExtensions`) - no peg or hub body was ever on screen.
+Toggling the checkbox off then on again was a false→false, then a
+false→true transition whose "on" screenshot never got captured before an
+unrelated verification bug (see below) - so the checkbox looked broken even
+after the gating fix actually landed.
+
+**Once actually visible, the hub/peg pieces revealed a real second bug.**
+`buildSnapHubGroup` draws all 3 pegs of a corner hub (one toward each of the
+vertex's 3 tips) unconditionally. In single-face preview mode - the ONLY
+mode `print3d` ever renders in - only 1 of those 3 tips belongs to the
+face actually on screen; the other 2 pegs point toward tips on faces that
+aren't drawn, so they read as thin sticks shooting off past the visible
+star into empty space. That, not the peg's own length (already correctly
+under the triangle's side length - `dist * snapPegOvershoot` measured
+~0.97 against a ~1.46 side), is what made the assembly look "way too
+large/long." Added a `pegMask` option to `buildSnapHubGroup`; the caller
+now only requests a peg toward tips whose label prefix matches the visible
+face, so each corner hub in single-face view draws exactly one peg,
+anchored to the one socket that's actually on screen.
+
+**Star Odyssey spiral: turns and sweep both cut by roughly two-thirds and
+half respectively** (`spiralTurns` 0.65→0.22, `spiralSweepFrac` 0.4→0.22),
+addressing "the
+star's tips... seem to be doing an unnecessary extra turn, so they're too
+curly." The clothoid tangent-match from §26 already guarantees a kink-free
+departure from the tip; this round's change only reduces how far the swirl
+winds before reaching the center, per the request to connect with "a
+smoother curve" rather than changing the underlying curve construction.
+Also added the missing Odyssey-specific sliders (`spiralTurns`,
+`spiralSweepFrac`, `spiralArcWidthFrac`) to the panel, shown/hidden opposite
+the horn-arc sliders based on `connectorStyle` - previously Star Odyssey
+showed the horn-arc panel's 4 sliders even though `buildSpiralVortexGroup`
+reads none of them, which was the other half of "none of those 4 scrolling
+bars" doing anything.
+
+Verified in headless Chromium: `showExtensions` reads back `true`
+immediately after selecting either preset (previously `false`); the
+print3d hub pieces now show exactly one peg per vertex, each terminating
+within the star's own footprint instead of running off past the frame
+edge; the Odyssey slider panel swaps correctly
+(`hornArcControls`/`spiralVortexControls` computed `display` flips between
+`none`/`block` on preset switch). The Playwright environment was
+intermittently flaky for longer multi-step scripts during this round
+(browser closing mid-script on otherwise-unrelated timeouts), which
+prevented capturing a direct old-vs-new pixel diff of the spiral's
+curliness; the turns/sweep reduction itself was verified by reading back
+the live `params` values and confirming the new preset defaults actually
+take effect, but its visual smoothness should get a final look from the
+user.
+
 ## File layout
 
 ```

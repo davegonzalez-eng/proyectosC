@@ -1172,6 +1172,15 @@ export function buildSnapHubGroup(tipA, tipB, tipC, params = {}) {
     // flat fraction of R that had no relationship to how far this
     // particular tip's socket actually sits.
     snapPegOvershoot = 1.15,
+    // Which of the 3 tips actually get a peg drawn. In single-face preview
+    // (the only place this is ever called from) only ONE of the triangle's
+    // 3 tips belongs to the face on screen - the other 2 pegs would aim at
+    // sockets on faces that aren't rendered, so they'd just be thin sticks
+    // shooting off past the visible star into empty space with nothing to
+    // anchor them, reading as "way too large/long" even though their
+    // length is correctly under the triangle's own side length. Defaults to
+    // all 3 so a full-assembly view (if ever built) still gets every peg.
+    pegMask = [true, true, true],
   } = params;
 
   const center = hornTriangleCenter(tipA, tipB, tipC);
@@ -1183,7 +1192,10 @@ export function buildSnapHubGroup(tipA, tipB, tipC, params = {}) {
 
   const pegRadius = R * snapPegRadiusFrac;
   const fallbackLength = R * snapPegLengthFrac;
-  for (const tip of [tipA, tipB, tipC]) {
+  const tips = [tipA, tipB, tipC];
+  for (let i = 0; i < tips.length; i++) {
+    if (!pegMask[i]) continue;
+    const tip = tips[i];
     // Aim at the socket's own world position, not the raw tip point: the
     // hole is inset along the arm's own (possibly bent/twisted) centerline,
     // not on the straight line from this center to the tip, so a peg aimed

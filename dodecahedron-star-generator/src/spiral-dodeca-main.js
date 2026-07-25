@@ -252,17 +252,25 @@ const params = {
   // alphaMap-texture perforation), sized for a peg pushed through the thin
   // printed sheet - see buildSolidStar2D's field-subtraction comment.
   snapEnabled: false,
-  snapHoleRadiusFrac: 0.05,
+  snapHoleRadiusFrac: 0.026,
   snapHoleInsetFrac: 0.11,
   // The separate small hub piece (peg + socket, corner-hub topology the
   // user chose): a rounded body at each triangle's center with 3 pegs
-  // reaching toward the sockets above.
-  hubBodyRadiusFrac: 0.07,
-  snapPegRadiusFrac: 0.045,
+  // reaching toward the sockets above. Sized to read as slim as the old
+  // horn-arc bead (extArcWidthFrac 0.04) rather than a chunky standalone
+  // part - reported as "way too large/long" at the first sizing (0.07
+  // body / 0.045 peg radius), which was noticeably fatter than the arc it
+  // replaced even though the actual REACH (center to tip) is already well
+  // under the triangle's own tip-to-tip span.
+  hubBodyRadiusFrac: 0.035,
+  snapPegRadiusFrac: 0.024,
   snapPegLengthFrac: 0.16,
-  // Star Odyssey spiral-vortex connector shape.
-  spiralTurns: 0.65,
-  spiralSweepFrac: 0.4,
+  // Star Odyssey spiral-vortex connector shape. Turns/sweep both well
+  // under the first version's 0.65/0.4 - that read as an unnecessary extra
+  // loop at each vertex ("too curly"); this settles for a single gentle
+  // swoop into the center instead of a visible coil.
+  spiralTurns: 0.22,
+  spiralSweepFrac: 0.22,
   spiralArcWidthFrac: 0.035,
 };
 
@@ -317,7 +325,13 @@ const PRESETS = {
     // mechanical mating surface. Off entirely so the tip (and its socket)
     // stays flat and predictable.
     tipBendStrength: 0, tipBendTwistDeg: 0, tipBendPower: 5,
-    showExtensions: false, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
+    // The hub+peg pieces are gated by `showExtensions` just like every
+    // other connector style (see rebuild()) - this preset's whole point is
+    // showing them, so it must default the checkbox on, not off. Leaving it
+    // off here previously meant the snap-hub/peg geometry never built at
+    // all, which read as "the checkbox does nothing" even though the
+    // checkbox itself worked fine once wired up.
+    showExtensions: true, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
     // Only one face gets built in this mode, so a bit more resolution than
     // the display default (144) is affordable - mostly so the snap-hole
     // socket reads as a reasonably round circle rather than a coarse
@@ -326,8 +340,8 @@ const PRESETS = {
     fieldGrid: 180,
     singleFaceMode: true, singleFaceIndex: 0,
     connectorStyle: 'snapHub', snapEnabled: true,
-    snapHoleRadiusFrac: 0.05, snapHoleInsetFrac: 0.11,
-    hubBodyRadiusFrac: 0.07, snapPegRadiusFrac: 0.045, snapPegLengthFrac: 0.16,
+    snapHoleRadiusFrac: 0.026, snapHoleInsetFrac: 0.11,
+    hubBodyRadiusFrac: 0.035, snapPegRadiusFrac: 0.024, snapPegLengthFrac: 0.16,
     material: 'matteWhite', pattern: 'none', lampMode: false,
   },
   // Same star/arm geometry as Stardream #1 - the brief was to change how
@@ -340,10 +354,14 @@ const PRESETS = {
     thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
     tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
     tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
-    showExtensions: false, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
+    // Same reasoning as print3d's hub/peg pieces: the spiral funnels ARE
+    // this preset's headline feature, so `showExtensions` must default to
+    // true or they never get built - that, not a broken checkbox, was why
+    // toggling "show horn arcs" looked like it did nothing here.
+    showExtensions: true, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
     fieldGrid: 144,
     singleFaceMode: false, connectorStyle: 'spiralVortex', snapEnabled: false,
-    spiralTurns: 0.65, spiralSweepFrac: 0.4, spiralArcWidthFrac: 0.035,
+    spiralTurns: 0.22, spiralSweepFrac: 0.22, spiralArcWidthFrac: 0.035,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: true, lampIntensity: 19,
   },
@@ -796,8 +814,13 @@ function rebuild() {
   let missing = 0;
   let connectorCount = 0;
 
-  if (params.connectorStyle === 'hornArc') {
-    if (params.showExtensions) {
+  // `showExtensions` ("Show horn arcs" in the panel) gates ALL THREE
+  // connector styles, not just the original horn arc - it used to only be
+  // checked inside the hornArc branch, so the checkbox silently did
+  // nothing in the other two presets (their own branches never looked at
+  // it at all).
+  if (params.showExtensions) {
+    if (params.connectorStyle === 'hornArc') {
       for (const { a, b } of connections) {
         const tipA = tipsByLabel.get(a);
         const tipB = tipsByLabel.get(b);
@@ -818,31 +841,40 @@ function rebuild() {
         extGroup.add(new THREE.Mesh(geometry, rimMaterial));
         connectorCount++;
       }
-    }
-  } else if (params.connectorStyle === 'snapHub') {
-    // 3D-printing preset: only the vertices touching the isolated face get
-    // a hub piece built - the other faces around those vertices aren't
-    // rendered anyway, so there's nothing to illustrate for the rest.
-    const facePrefix = `F${params.singleFaceIndex}-`;
-    for (const triple of threeCycles) {
-      if (!triple.some((label) => label.startsWith(facePrefix))) continue;
-      const tips = triple.map((label) => tipsByLabel.get(label));
-      if (tips.some((t) => !t)) { missing++; continue; }
-      const hubGroup = buildSnapHubGroup(tips[0], tips[1], tips[2], { R, ...params });
-      hubGroup.children.forEach((m) => { m.material = rimMaterial; });
-      extGroup.add(hubGroup);
-      connectorCount++;
-    }
-  } else if (params.connectorStyle === 'spiralVortex') {
-    // Star Odyssey: every vertex gets a 3-way spiral instead of the three
-    // horn-arc pairs that would otherwise connect it.
-    for (const triple of threeCycles) {
-      const tips = triple.map((label) => tipsByLabel.get(label));
-      if (tips.some((t) => !t)) { missing++; continue; }
-      const vortexGroup = buildSpiralVortexGroup(tips[0], tips[1], tips[2], { R, ...params });
-      vortexGroup.children.forEach((m) => { m.material = rimMaterial; });
-      extGroup.add(vortexGroup);
-      connectorCount++;
+    } else if (params.connectorStyle === 'snapHub') {
+      // 3D-printing preset: only the vertices touching the isolated face
+      // get a hub piece built - the other faces around those vertices
+      // aren't rendered anyway, so there's nothing to illustrate for the
+      // rest.
+      const facePrefix = `F${params.singleFaceIndex}-`;
+      for (const triple of threeCycles) {
+        if (!triple.some((label) => label.startsWith(facePrefix))) continue;
+        const tips = triple.map((label) => tipsByLabel.get(label));
+        if (tips.some((t) => !t)) { missing++; continue; }
+        // Only draw a peg toward a tip that's actually on the visible face -
+        // the other 1-2 tips of this triple belong to faces that aren't
+        // rendered in single-face mode, so a peg aimed at them is a thin
+        // stick shooting off into empty space with no visible socket to
+        // reach, which is what made the whole assembly read as "way too
+        // large/long" even though each peg's own length is correctly under
+        // the triangle's side length.
+        const pegMask = triple.map((label) => label.startsWith(facePrefix));
+        const hubGroup = buildSnapHubGroup(tips[0], tips[1], tips[2], { R, ...params, pegMask });
+        hubGroup.children.forEach((m) => { m.material = rimMaterial; });
+        extGroup.add(hubGroup);
+        connectorCount++;
+      }
+    } else if (params.connectorStyle === 'spiralVortex') {
+      // Star Odyssey: every vertex gets a 3-way spiral instead of the
+      // three horn-arc pairs that would otherwise connect it.
+      for (const triple of threeCycles) {
+        const tips = triple.map((label) => tipsByLabel.get(label));
+        if (tips.some((t) => !t)) { missing++; continue; }
+        const vortexGroup = buildSpiralVortexGroup(tips[0], tips[1], tips[2], { R, ...params });
+        vortexGroup.children.forEach((m) => { m.material = rimMaterial; });
+        extGroup.add(vortexGroup);
+        connectorCount++;
+      }
     }
   }
 
@@ -903,6 +935,9 @@ bindSlider('extLengthFactor', 'extLengthFactor');
 bindSlider('extDepthFraction', 'extDepthFraction');
 bindSlider('extArcWidthFrac', 'extArcWidthFrac');
 bindSlider('extClothoid', 'extClothoid');
+bindSlider('spiralTurns', 'spiralTurns');
+bindSlider('spiralSweepFrac', 'spiralSweepFrac');
+bindSlider('spiralArcWidthFrac', 'spiralArcWidthFrac');
 bindSlider('rimWidthFrac', 'rimWidthFrac');
 bindSlider('rimProudFrac', 'rimProudFrac');
 bindSlider('holeSize', 'holeSize', { appearanceOnly: true });
@@ -969,11 +1004,22 @@ const PRESET_HINTS = {
   print3d: 'One detailed face at a time, sized for a real print - peg + socket friction-fit joints (small hub piece per vertex) instead of the fused horn arc. Pick which face with the slider below.',
   starOdyssey: "Same stars as #1, but every horn-triangle arc is replaced by a 3-way spiral funnel converging at that vertex's center.",
 };
+// Each connector style has its own shape sliders (the horn arc's
+// length/depth/clothoid params mean nothing to the spiral vortex, and vice
+// versa) - shown/hidden together so a preset never leaves a slider on
+// screen that silently does nothing, which is exactly what happened before
+// this: Star Odyssey used the horn-arc panel's sliders (and its own
+// "Show connectors" checkbox check) despite reading none of those params.
+function updateConnectorControlsVisibility() {
+  document.getElementById('hornArcControls').style.display = params.connectorStyle === 'hornArc' ? 'block' : 'none';
+  document.getElementById('spiralVortexControls').style.display = params.connectorStyle === 'spiralVortex' ? 'block' : 'none';
+}
 document.getElementById('preset').addEventListener('change', (e) => {
   const name = e.target.value;
   window.__spiralDodeca.applyPreset(name);
   document.getElementById('preset-hint').textContent = PRESET_HINTS[name] || '';
   document.getElementById('singleFaceRow').style.display = params.singleFaceMode ? 'block' : 'none';
+  updateConnectorControlsVisibility();
 });
 document.getElementById('singleFaceIndex').addEventListener('input', (e) => {
   const v = parseInt(e.target.value, 10);
@@ -1057,6 +1103,7 @@ applyPattern();
 applyLampMode(params.lampMode);
 applyClipping();
 rebuild();
+updateConnectorControlsVisibility();
 
 // Flyover camera: OrbitControls is disabled while active (both drive the
 // same camera) and the default view is restored on exit so control hands
