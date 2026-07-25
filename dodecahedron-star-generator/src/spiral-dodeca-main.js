@@ -349,8 +349,11 @@ const PRESETS = {
   // bow is replaced by a 3-way spiral vortex converging at that vertex's
   // "circular horn triangle" center.
   starOdyssey: {
-    starRotationDeg: 29, tipScale: 1.28, turns: 0.1, hubRadiusFrac: 0.24,
-    bandHalfWidth: 0.23, tipWidthFrac: 0.12, widthTaperPower: 0.9,
+    // Retuned to the user's own live-session values (starRotationDeg,
+    // tipScale, hubRadiusFrac, bandHalfWidth, the spiral shape params, and
+    // lampMode all moved off their original §25/§27 defaults).
+    starRotationDeg: 19, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.2,
+    bandHalfWidth: 0.305, tipWidthFrac: 0.12, widthTaperPower: 0.9,
     thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
     tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
     tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
@@ -361,9 +364,9 @@ const PRESETS = {
     showExtensions: true, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
     fieldGrid: 144,
     singleFaceMode: false, connectorStyle: 'spiralVortex', snapEnabled: false,
-    spiralTurns: 0.22, spiralSweepFrac: 0.22, spiralArcWidthFrac: 0.035,
+    spiralTurns: 0.1, spiralSweepFrac: 0.02, spiralArcWidthFrac: 0.025,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
-    lampMode: true, lampIntensity: 19,
+    lampMode: false, lampIntensity: 19,
   },
 };
 

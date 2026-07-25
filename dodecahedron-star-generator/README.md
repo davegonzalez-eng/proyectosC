@@ -1772,6 +1772,23 @@ All debug hooks (`__debugPhaseLog`, `__debugScreenHasGeometryAtRaw`, and
 the phase-marking scaffolding in `buildFlyoverPath`) were removed after
 verification.
 
+## 29. Star Odyssey preset retuned to the user's own live-tuned values
+
+The user tuned the Star Odyssey preset live in their own session (adjusting
+sliders directly) and pasted back the full resulting settings-table export
+(the existing "copy settings" feature from §56). Folded the deltas from the
+preset's previous baked-in defaults into the `starOdyssey` bundle:
+`starRotationDeg` 29→19, `tipScale` 1.28→1.14, `hubRadiusFrac` 0.24→0.2,
+`bandHalfWidth` 0.23→0.305, `spiralTurns` 0.22→0.1, `spiralSweepFrac`
+0.22→0.02, `spiralArcWidthFrac` 0.035→0.025, `lampMode` true→false.
+Everything else in the export already matched the existing bundle. Session/
+UI-only fields in the export (`debugFacePick`, `clip*`, `flyoverMode`,
+`flyoverSpeed`, `preset`) were left out, same as every other preset bundle -
+those aren't part of a preset's appearance, they're live view state.
+
+Verified in headless Chromium: selecting the preset reads back every one of
+these eight values exactly, with zero console errors.
+
 ## File layout
 
 ```
