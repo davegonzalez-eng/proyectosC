@@ -886,7 +886,14 @@ export function computeArmTips(star2D, face, params = {}) {
       second.addScaledVector(tangent, -second.dot(tangent));
       if (second.lengthSq() > 1e-18) tipCurvature.copy(second.normalize().multiplyScalar(kappa));
     }
-    return { armIndex, tipPosition: p0, tipTangent: tangent, tipCurvature };
+    // World position of this arm's snap-hole socket (if any) - the hub
+    // piece's pegs need to aim at THIS, not at the raw tip point: the hole
+    // sits inset along the arm's own (possibly bent/twisted) centerline,
+    // not on the straight line from a horn-triangle center to the tip, so
+    // a peg aimed at `tipPosition` generally misses it.
+    const hole2D = star2D.snapHoleCenters2D && star2D.snapHoleCenters2D[armIndex];
+    const snapHolePosition = hole2D ? place(hole2D.x, hole2D.y) : null;
+    return { armIndex, tipPosition: p0, tipTangent: tangent, tipCurvature, snapHolePosition };
   });
 }
 
@@ -1157,6 +1164,14 @@ export function buildSnapHubGroup(tipA, tipB, tipC, params = {}) {
     hubBodyRadiusFrac = 0.07,
     snapPegRadiusFrac = 0.045,
     snapPegLengthFrac = 0.16,
+    // How far past the socket's own position each peg extends, as a
+    // multiple of the actual center-to-socket distance - a small overshoot
+    // so the peg fully pokes through the thin printed sheet (a through-hole
+    // needs the peg to reach past its far face, not just touch it), while
+    // still being sized off the REAL geometry-derived distance instead of a
+    // flat fraction of R that had no relationship to how far this
+    // particular tip's socket actually sits.
+    snapPegOvershoot = 1.15,
   } = params;
 
   const center = hornTriangleCenter(tipA, tipB, tipC);
@@ -1167,9 +1182,18 @@ export function buildSnapHubGroup(tipA, tipB, tipC, params = {}) {
   group.add(new THREE.Mesh(bodyGeom));
 
   const pegRadius = R * snapPegRadiusFrac;
-  const pegLength = R * snapPegLengthFrac;
+  const fallbackLength = R * snapPegLengthFrac;
   for (const tip of [tipA, tipB, tipC]) {
-    const direction = tip.tipPosition.clone().sub(center).normalize();
+    // Aim at the socket's own world position, not the raw tip point: the
+    // hole is inset along the arm's own (possibly bent/twisted) centerline,
+    // not on the straight line from this center to the tip, so a peg aimed
+    // at `tipPosition` generally misses the hole entirely - this was the
+    // reported "hub not connected to the tips" bug.
+    const target = tip.snapHolePosition || tip.tipPosition;
+    const toTarget = target.clone().sub(center);
+    const dist = toTarget.length();
+    const direction = dist > 1e-9 ? toTarget.multiplyScalar(1 / dist) : new THREE.Vector3(0, 0, 1);
+    const pegLength = dist > 1e-9 ? dist * snapPegOvershoot : fallbackLength;
     const pegGeom = cylinderBetween(center, direction, pegLength, pegRadius);
     group.add(new THREE.Mesh(pegGeom));
   }
@@ -1180,22 +1204,43 @@ export function buildSnapHubGroup(tipA, tipB, tipC, params = {}) {
  * Star Odyssey's replacement for the horn arc: instead of one side of the
  * triangle bowing tip-to-tip around the OUTSIDE, each of the three tips
  * spirals INWARD, converging at `hornTriangleCenter` - a small three-armed
- * vortex/funnel instead of a curved triangle. A simple conical (not
- * logarithmic) spiral: sweep radius shrinks LINEARLY to a small nub while
- * the angle keeps advancing at a constant rate, avoiding the log/exp
- * singularities a true logarithmic spiral has at r -> 0. The initial
- * sweep direction is the tip's own outward tangent (projected perpendicular
- * to the tip->center axis) so the connector at least LEAVES the tip
- * continuing the arm's own lean, even though exact curvature/tangent
- * matching (like the horn arc's clothoid fit) isn't attempted here - there
- * are three shared endpoints converging on one point with no single
- * natural tangent to match there, unlike the paired horn arc.
+ * vortex/funnel instead of a curved triangle.
+ *
+ * Two problems with the first version of this (reported after shipping):
+ * the spiral turned the wrong way, and the merge into the tip had a visible
+ * kink - it didn't even start exactly AT the tip point (the old parametrization
+ * placed t=0 a full sweep-radius away from it), let alone match the arm's own
+ * departure tangent there.
+ *
+ * Fixed with two curves added together:
+ *  1. A tangent-matched quadratic Bezier from the tip P to the center C,
+ *     with its control point placed along the arm's own outward tip
+ *     tangent - so the BASE curve alone already leaves the tip exactly
+ *     continuing the arm's direction (like the horn arc's own "leaves tip A
+ *     along A's outward direction" convention), and lands exactly at C.
+ *  2. A swirl added on top: sweep radius follows an envelope that is BOTH
+ *     zero-valued and zero-SLOPE at t=0 (t^2*(1-t), which vanishes with a
+ *     flat tangent at the origin) - so the swirl contributes nothing to
+ *     either position or tangent right at the tip, leaving the Bezier's own
+ *     clean tangent match untouched, then rises to a peak and eases back to
+ *     zero at the center so the three tips still converge there exactly.
+ *     The angle itself ramps as `t^2` (zero angular RATE at t=0, growing
+ *     linearly with t) - curvature growing linearly from zero, arc-length
+ *     to arc-length, is the defining property of a clothoid/Euler spiral,
+ *     which is what gives the gradual, kink-free spin-up into the vortex
+ *     instead of an abrupt one.
+ * The combination is G1-continuous with the arm's tangent at the tip by
+ * construction (checked analytically: the swirl's derivative is exactly
+ * zero there regardless of `turns`/`sweepFrac`), not merely close.
+ * @param {number} [options.direction=-1] rotation handedness; flip the sign
+ *   to reverse which way the vortex spins.
  * @returns {(t: number) => THREE.Vector3} t in [0,1], tip at 0, center at 1
  */
 export function spiralVortexPointAt(tip, center, options = {}) {
-  const { turns = 0.65, sweepFrac = 0.4 } = options;
+  const { turns = 0.65, sweepFrac = 0.4, launchFrac = 0.4, direction = -1 } = options;
   const P = tip.tipPosition.clone();
-  const axis = center.clone().sub(P);
+  const C = center.clone();
+  const axis = C.clone().sub(P);
   const axisLen = axis.length();
   if (axisLen > 1e-9) axis.normalize(); else axis.set(0, 0, 1);
 
@@ -1207,15 +1252,27 @@ export function spiralVortexPointAt(tip, center, options = {}) {
   e1.normalize();
   const e2 = new THREE.Vector3().crossVectors(axis, e1).normalize();
 
-  const thetaMax = turns * Math.PI * 2;
-  const r0 = axisLen * sweepFrac;
+  const M = P.clone().addScaledVector(tip.tipTangent, axisLen * launchFrac);
+  const base = (t) => {
+    const mt = 1 - t;
+    return P.clone().multiplyScalar(mt * mt)
+      .addScaledVector(M, 2 * mt * t)
+      .addScaledVector(C, t * t);
+  };
+
+  const thetaMax = direction * turns * Math.PI * 2;
+  const maxSweep = axisLen * sweepFrac;
+  // Rescaled by 27/4 (the reciprocal of t^2*(1-t)'s own peak, at t=2/3) so
+  // `sweepFrac` means the swirl's actual peak deviation, not the raw
+  // envelope shape's smaller, not-round-number maximum.
+  const envelope = (t) => (t * t * (1 - t)) * (27 / 4);
+
   return (t) => {
-    const theta = thetaMax * t;
-    const radius = r0 * (1 - t);
-    return P.clone()
-      .addScaledVector(axis, axisLen * t)
-      .addScaledVector(e1, radius * Math.cos(theta))
-      .addScaledVector(e2, radius * Math.sin(theta));
+    const theta = thetaMax * t * t;
+    const sweep = maxSweep * envelope(t);
+    return base(t)
+      .addScaledVector(e1, sweep * Math.cos(theta))
+      .addScaledVector(e2, sweep * Math.sin(theta));
   };
 }
 

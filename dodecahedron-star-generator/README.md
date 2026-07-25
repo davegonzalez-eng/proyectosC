@@ -1566,6 +1566,95 @@ now the spiral vortex, a cosmetic mismatch. No STL/3MF export exists yet
 (flagged in the printability assessment this whole branch follows from) -
 the 3D-Printing preset is print-READY geometry, not yet an exportable file.
 
+## 26. Follow-up fixes: spiral direction/smoothness, hub/peg alignment, flyover crossing redesign
+
+Three separate fixes from feedback on §25's three presets.
+
+**Star Odyssey spiral: reversed direction, clothoid-smooth tip merge.**
+Two problems: the vortex spun the wrong way, and it didn't even leave the
+tip cleanly - the OLD parametrization's `t=0` point sat a full sweep-radius
+away from the actual tip position, let alone matched the arm's own
+departure tangent there. Rebuilt `spiralVortexPointAt` as two curves added
+together: (1) a tangent-matched quadratic Bezier from the tip to the
+center, control point placed along the arm's own outward tip tangent, so
+the base curve alone already leaves the tip exactly continuing the arm's
+direction and lands exactly at the center; (2) a swirl on top, using an
+envelope (`t^2*(1-t)`) that's both zero-VALUE and zero-SLOPE at `t=0` - so
+it contributes nothing to position or tangent right at the tip, leaving
+(1)'s clean match untouched - rising to a peak, then easing back to zero at
+the center so the three tips still converge there exactly. The swirl's own
+angle ramps as `t^2` (zero angular rate at the tip, growing linearly with
+`t`) - curvature growing linearly from zero is the defining property of a
+clothoid. A new `direction` option (default flipped from the implicit old
+behavior) reverses the handedness. Checked analytically and numerically:
+the numeric tangent at `t=0` now matches the real arm tangent to 6 decimal
+places, `t=0`/`t=1` land exactly on the tip/center, regardless of `turns`
+or `sweepFrac`.
+
+**Snap-hub pegs now actually reach the sockets; tip protuberance gone.**
+Two related bugs. First, `computeArmTips` now also returns each arm's
+`snapHolePosition` (the socket's real WORLD position, computed by mapping
+`star2D.snapHoleCenters2D`'s already-known 2D coordinate through the same
+`place()` pipeline everything else uses) - `buildSnapHubGroup`'s pegs
+previously aimed at the raw tip point via a straight line from the
+horn-triangle center, but the socket sits INSET along the arm's own
+(bent/twisted) centerline, not on that straight line, so pegs missed
+entirely. Pegs are now sized and aimed at the real socket position, with a
+15% overshoot (`snapPegOvershoot`) so they fully poke through the thin
+printed sheet rather than just touching it. Second, the print preset now
+sets `tipBendStrength: 0, tipBendTwistDeg: 0` - the exponential tip-bend
+exists purely to pre-angle the DISPLAY tip to match the old horn-arc's
+incoming tangent; with a straight peg instead of a curved arc there's
+nothing left for it to match, and at this preset's much wider/thicker tip
+it read as a "weird head/protuberance." Checked in headless Chromium: pegs
+from multiple hub pieces visibly reach into the star's tip edges at
+several connection points, and the tips themselves are flat and clean, no
+bulge.
+
+**Flyover: default speed 0.03; horn-triangle crossing redesigned.** The
+old crossing flew directly along the rendered horn-arc bead, including its
+own mid-span dip underneath the neighboring star - reported as
+disorienting. Replaced with the same "pull out, orbit, come back down"
+shape the star-face flourish already uses, just scaled down: zoom out from
+the tip just reached, orbit exactly 120 degrees (the three meeting tips'
+own natural spacing) around the horn-triangle's TRUE center - the centroid
+of all three tips at that vertex (found via `computeThreeCycles`, not just
+the two tips this hop touches), sized off their own average spread rather
+than a whole face's `R_out` - then descend back onto the neighboring
+star's tip, landing at the exact point the star flourish (and the next
+hop's own arm traversal) already use as their reference.
+
+Caught two bugs before shipping, both the same class:
+- The `hornTriangleCenter` lookup needs the THIRD tip of the vertex (not
+  just the two this hop's pair touches) - found via `threeCycles.find()`
+  matching both labels, third label = whichever of the triple isn't either
+  of those two.
+- Both the new horn-triangle flourish AND the pre-existing star flourish
+  eased their "look at the pivot" gaze bias in LINEARLY with the zoom/
+  descend progress (`.multiplyScalar(t)` / `.multiplyScalar(1 - t)`).
+  Sampling specific points along the curve (a debug hook temporarily
+  exposed the raw camera position/direction) turned up several BLACK
+  frames - measured directly, right as a zoom-out begins the camera is
+  still looking tangent-forward off the tip, up to ~90 degrees from the
+  actual pivot, and a bias that's still mostly faded in that early doesn't
+  reliably outweigh the default lookahead. Fixed by applying the zoom's
+  offset at FULL strength immediately (no `t` easing - snapping to "look at
+  the pivot" reads fine at flyover speed) and switching the descend's
+  taper from linear to `1 - t^2`, which holds the correction close to full
+  strength through most of the descent and only relaxes it in the final
+  stretch, right as position/normal are themselves converging on the
+  target anyway. The star flourish had the identical bug (same code
+  pattern, never actually exercised at the same problem angles before) -
+  fixed the same way in both places.
+
+Checked in headless Chromium: swept ~20 points across a full hop (arm end,
+both flourishes' zoom/cruise/descend phases, next hop's start) before the
+fix, found black frames exactly where the tangent-vs-pivot math predicted;
+same sweep after the fix shows real geometry everywhere, including the
+"hovering around the full star face" the user specifically likes,
+unchanged. A 6-second real-timing run (actual checkbox toggle, no debug
+time-injection) at the new 0.03 default produced zero console errors.
+
 ## File layout
 
 ```

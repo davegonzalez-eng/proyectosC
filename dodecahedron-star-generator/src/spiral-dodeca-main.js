@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections, computeThreeCycles } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornArcPointAt, buildSnapHubGroup, buildSpiralVortexGroup } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup } from './spiralarm.js';
 import { createPerforationTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -226,10 +226,11 @@ const params = {
   // to its tip, one side of the horn triangle across to the next star,
   // then back across that star's face and out along its own next arm -
   // looping continuously through several faces. Speed is a multiplier on
-  // the nominal 34s lap (negative rewinds, 0 pauses); starts slow (1/3)
-  // so the first view of it reads as a leisurely tour, not a blur.
+  // the nominal 34s lap (negative rewinds, 0 pauses); starts quite slow so
+  // the star-face orbit flourish (the part worth lingering on) doesn't fly
+  // past too quickly.
   flyoverMode: false,
-  flyoverSpeed: 0.33,
+  flyoverSpeed: 0.03,
 
   // --- Presets (see PRESETS below) ---
   // `preset` just tracks which dropdown entry is selected; the params it
@@ -308,7 +309,14 @@ const PRESETS = {
     bandHalfWidth: 0.26, tipWidthFrac: 0.4, widthTaperPower: 0.9,
     thickness: 0.03, tipThicknessFrac: 0.6, bulgeStrength: 0.16,
     tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
-    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
+    // The exponential tip-bend (dip + twist) exists purely to pre-angle the
+    // DISPLAY tip to match the old horn-arc's incoming tangent - with a
+    // straight peg instead of a curved arc there's nothing for it to match
+    // any more, and at this preset's much wider/thicker tip it was reported
+    // as a "weird head/protuberance" - an organic curl fighting a
+    // mechanical mating surface. Off entirely so the tip (and its socket)
+    // stays flat and predictable.
+    tipBendStrength: 0, tipBendTwistDeg: 0, tipBendPower: 5,
     showExtensions: false, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
     // Only one face gets built in this mode, so a bit more resolution than
     // the display default (144) is affordable - mostly so the snap-hole
@@ -373,48 +381,43 @@ function smoothstep(t) {
 // pipeline uses - not an approximation. Starting at one arm's tip, each
 // "hop" (a) flies that arm inward toward its hub ("to the star face"),
 // (b) picks the next arm on that same face and flies back OUT to its tip
-// ("back inside following the next arm"), (c) follows one side of that
-// tip's horn triangle over to a neighboring star's tip ("turns right to
-// continue to the tip of the adjacent star"), (d) once outside on that
-// neighbor's tip again, pulls up and out into a wide "orbit flourish"
-// around that whole star (rotating ~4/5 of the way around while looking
-// down at it) before settling back down to the exact hover height/tilt
-// the arm segments use, then repeats from there. Preceded by a short
-// establishing approach (far -> aligned with the first arm's outward
-// tangent -> the tip itself) so the loop's first beat reads as
-// "approaches, tilts parallel to a star arm, and zooms in."
+// ("back inside following the next arm"), (c) pulls up and out into a
+// small orbit flourish around that tip's horn-triangle center, rotating
+// 120 degrees (the three meeting tips' own natural spacing) before
+// descending back down onto a neighboring star's tip ("turns right to
+// continue to the tip of the adjacent star"), (d) once there, pulls up and
+// out AGAIN into a much wider orbit flourish around that whole star
+// (rotating ~4/5 of the way around while looking down at it) before
+// settling back down to the exact hover height/tilt the arm segments use,
+// then repeats from there. Preceded by a short establishing approach (far
+// -> aligned with the first arm's outward tangent -> the tip itself) so
+// the loop's first beat reads as "approaches, tilts parallel to a star
+// arm, and zooms in."
+//
+// (c) used to fly directly along the rendered horn-arc bead, including its
+// own mid-span dip underneath the neighboring star - geometrically
+// faithful, but reported as disorienting ("the viewer gets lost"). Now it
+// uses the same "pull out, orbit, come back down" shape (d) already uses
+// for a whole star, just scaled to the horn-triangle's own three-tip
+// span and rotated by a fixed 120 degrees - both flourishes share the same
+// `lookAtCenterOffset`-style gaze bias (looking at the pivot point, not
+// just tangent-forward) baked into `lookOffsets`.
 //
 // Arm segments hover just OUTSIDE the star's external surface along its
 // TRUE local normal (`mapArmCenterlineWithNormal`), not the sphere-radial
 // direction - measured up to ~27 degrees apart right where the exponential
 // tip-bend curls the surface near a tip, which is exactly where a radial
 // hover let the camera clip under the shell right after the approach.
-// Hovering along the real normal keeps the camera genuinely skimming the
-// visible top of the arm the whole way, tip included - reading as gliding
-// through the gap between one star's arm and its neighbor rather than
-// ducking beneath it. A constant gentle downward gaze tilt (applied every
-// frame in updateFlyoverCamera, adjustable live with Arrow Up/Down)
-// reinforces the "low flyover" read. The horn-arc segments are the one
-// place that genuinely dips underneath a neighboring star (their own
-// mid-span `depthFraction` squash already does that) - "the small space
-// where it goes underneath the adjacent star" - so those points get a
-// small sideways push (to the right, relative to travel direction) baked
-// into their position, windowed smoothly across the arc (zero at both
-// cusps) so it ramps in and out rather than popping. `lookOffsets`, a
-// parallel array of world-space bias vectors (zero except across those
-// same arc stretches, pointing the opposite lateral direction - left),
-// lets the per-frame lookAt counter-tilt the gaze without a second
-// geometry pass. `normals`, another parallel array (the true local normal
-// for arm points, sphere-radial as a fallback for the approach/arc points
-// which have no local (u,w) frame of their own), drives both the hover
-// offset already baked into `points` and the camera's own banking at
-// playback time. `speedMultipliers`, a fourth parallel array, scales how
-// fast `flyoverT` advances at each point: slower near an arm's tip (the
-// thinnest part of the star), slower still through the horn-arc maneuver,
-// then faster as the arc's tail emerges from underneath back onto the
-// next star's main surface - a pace the orbit flourish's zoom-out
-// continues before easing back to the default cruising speed.
-function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
+// `normals`, a parallel array (the true local normal for arm points,
+// sphere-radial as a fallback for the approach points, which have no local
+// (u,w) frame of their own, and each flourish's own pivot-relative normal
+// elsewhere), drives both the hover offset already baked into `points` and
+// the camera's own banking at playback time. `speedMultipliers`, another
+// parallel array, scales how fast `flyoverT` advances at each point:
+// slower near an arm's tip (the thinnest part of the star) and through
+// each flourish's own orbit, faster right as a flourish's descent "emerges"
+// back onto a star's main surface.
+function buildFlyoverPath(star2D, faces, tipsByLabel, connections, threeCycles, params) {
   const R = star2D.R;
   // `mapStarPoint` (and so `mapArmCenterlineWithNormal`) returns the star
   // sheet's MIDPLANE, not its outer surface - the sheet has real thickness
@@ -485,19 +488,14 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
 
   let currentLabel = startLabel;
   const numHops = 10;
-  const arcSamples = 24;
-  // Horn-arc speed profile: normal pace leaving the tip, slow through the
-  // "maneuvering around the triangle" midsection, then ramping up toward
-  // the far tip - that ramp up IS "emerging from underneath back to the
-  // main surface," so it's already fast by s = 1, and the flourish below
-  // continues easing off that same fast pace rather than starting cold.
+  // Shared "maneuvering, then emerging" speed pace both the horn-triangle
+  // crossing flourish (c) and the star flourish (d) use: slow through their
+  // own orbit, then ramping up toward the far end - that ramp up IS
+  // "emerging back onto the main surface," so each flourish's landing is
+  // already fast, and the NEXT flourish's own zoom-out continues easing off
+  // that same pace rather than starting cold.
   const ARC_SLOW_SPEED = 0.4;
   const ARC_EMERGE_SPEED = 1.5;
-  const arcSpeedAt = (s) => {
-    if (s < 0.15) return 1 - (1 - ARC_SLOW_SPEED) * smoothstep(s / 0.15);
-    if (s < 0.75) return ARC_SLOW_SPEED;
-    return ARC_SLOW_SPEED + (ARC_EMERGE_SPEED - ARC_SLOW_SPEED) * smoothstep((s - 0.75) / 0.25);
-  };
   for (let hop = 0; hop < numHops; hop++) {
     const { faceIdx, armIdx } = parseLabel(currentLabel);
     const face = faces[faceIdx];
@@ -509,57 +507,140 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
     // (b) pick the next arm on the same face, fly hub -> tip, same
     // external hover ("back inside following the next arm").
     const nextArmIdx = (armIdx + 1) % armCount;
-    pushArm(mapArmCenterlineWithNormal(star2D, face, nextArmIdx, params), true);
+    const nextArmFrames = mapArmCenterlineWithNormal(star2D, face, nextArmIdx, params);
+    pushArm(nextArmFrames, true);
 
     const nextLabel = `F${faceIdx}-A${nextArmIdx}`;
     const nextTip = tipsByLabel.get(nextLabel);
 
-    // (c) follow one side of that tip's horn triangle to a neighboring
-    // star's tip, alternating which of the two sides across hops for
-    // variety ("turns right to continue to the tip of the adjacent star").
+    // Which neighboring star's tip this hop crosses to - alternating which
+    // of the two options across hops for variety ("turns right to continue
+    // to the tip of the adjacent star").
     const options = neighbors.get(nextLabel);
     const chosenLabel = options[hop % options.length];
     const chosenTip = tipsByLabel.get(chosenLabel);
-    const arcFn = hornArcPointAt(nextTip, chosenTip, {
-      lengthFactor: params.extLengthFactor,
-      depthFraction: params.extDepthFraction,
-      clothoidFactor: params.extClothoid,
-    });
-    // Same "don't fly through the solid material" fix as the arm hover:
-    // arcFn returns the horn-arc TUBE's own centerline, which has a real
-    // cross-section radius (arcHeight/2 = R*max(rimProudFrac,0.005) in
-    // rebuild()'s buildHornArc call) - hovering right on it puts the
-    // camera inside the tube. Clear it with the same margin.
-    const arcHoverFrac = Math.max(params.rimProudFrac ?? 0, 0.005) + 0.02;
-    let lastArcPoint = null;
-    let lastArcNormal = null;
-    for (let i = 0; i <= arcSamples; i++) {
-      const s = i / arcSamples;
-      const p = arcFn(s);
-      const tangent = arcFn(Math.min(s + 1e-3, 1)).sub(arcFn(Math.max(s - 1e-3, 0))).normalize();
-      const outward = p.clone().normalize();
-      let right = new THREE.Vector3().crossVectors(tangent, outward);
-      if (right.lengthSq() < 1e-10) right.set(1, 0, 0); else right.normalize();
-      const w = Math.sin(Math.PI * s); // 0 at both cusps, 1 at mid-arc
-      const hovered = p.clone().addScaledVector(outward, arcHoverFrac * R).addScaledVector(right, R * 0.07 * w);
-      pushPoint(hovered, outward, right.clone().multiplyScalar(-R * 0.18 * w), arcSpeedAt(s));
-      lastArcPoint = hovered;
-      lastArcNormal = outward;
-    }
 
-    // (d) orbit flourish: having just emerged from underneath the arc back
-    // onto `chosenLabel`'s star, pull up and out, sweep ~4/5 of the way
-    // around that whole face while looking down at it from above, then
-    // spend the remaining ~1/5 of the turn descending back down to the
-    // exact hover point/normal the next hop's arm traversal starts from -
-    // so the loop stays perfectly continuous into (a) above, next time
-    // through, with no seam.
+    // Where this hop lands: computed here (not down in (d) where it used
+    // to live) since both the new (c) crossing flourish AND the (d) star
+    // flourish need it - (c) descends onto it, (d) starts its own zoom-out
+    // FROM it, so the two flourishes hand off at exactly the same point/
+    // normal the next hop's own step (a) will also start from, with no
+    // seam anywhere in the chain.
     const { faceIdx: newFaceIdx, armIdx: newArmIdx } = parseLabel(chosenLabel);
     const orbitFace = faces[newFaceIdx];
     const chosenFrames = mapArmCenterlineWithNormal(star2D, orbitFace, newArmIdx, params);
     const targetPoint = chosenFrames[0].point.clone().addScaledVector(chosenFrames[0].normal, hoverFrac * R);
     const targetNormal = chosenFrames[0].normal;
     const tipAngle = Math.atan2(chosenTip.tipPosition.dot(orbitFace.W), chosenTip.tipPosition.dot(orbitFace.U));
+
+    // (c) horn-triangle crossing flourish: pull up and out from the tip
+    // just reached in (b), orbit 120 degrees (the three tips' own natural
+    // spacing) around the horn-triangle's center - the centroid of all
+    // three tips meeting at this dodecahedron vertex, not just the two
+    // this hop actually touches - then descend back down onto the
+    // neighboring star's tip. Replaces flying along the rendered horn-arc
+    // bead's own underneath dip, which read as disorienting.
+    const triple = threeCycles.find((t) => t.includes(nextLabel) && t.includes(chosenLabel));
+    const thirdLabel = triple.find((l) => l !== nextLabel && l !== chosenLabel);
+    const thirdTip = tipsByLabel.get(thirdLabel);
+    const htCenter = hornTriangleCenter(nextTip, chosenTip, thirdTip);
+    const htNormal = htCenter.clone().normalize();
+    const htU = nextTip.tipPosition.clone().sub(htCenter);
+    htU.addScaledVector(htNormal, -htU.dot(htNormal));
+    if (htU.lengthSq() < 1e-10) htU.set(1, 0, 0);
+    htU.normalize();
+    const htW = new THREE.Vector3().crossVectors(htNormal, htU).normalize();
+    // Sized off the three tips' own average distance from the center they
+    // share, not off R_out (which is the whole FACE's scale - this pivot
+    // is much smaller, just the gap between three neighboring tips).
+    const htSpread = (nextTip.tipPosition.distanceTo(htCenter)
+      + chosenTip.tipPosition.distanceTo(htCenter)
+      + thirdTip.tipPosition.distanceTo(htCenter)) / 3;
+    const htOrbitRadius = htSpread * 1.3;
+    const htOrbitHeight = htSpread * 0.9;
+    const htOrbitPoint = (angle, height) => htCenter.clone()
+      .addScaledVector(htU, Math.cos(angle) * htOrbitRadius)
+      .addScaledVector(htW, Math.sin(angle) * htOrbitRadius)
+      .addScaledVector(htNormal, height);
+    const htLookAtCenterOffset = (angle, height) => htCenter.clone().sub(htOrbitPoint(angle, height)).multiplyScalar(1.4);
+
+    // `htU` points toward `nextTip` (angle 0 in this frame) by
+    // construction; rotate the full 120 degrees toward whichever side
+    // actually lands closer to `chosenTip`'s own angle, so the flourish
+    // visibly progresses toward where it's headed rather than away from it.
+    const HT_ROTATE = (Math.PI * 2) / 3;
+    const toChosen = chosenTip.tipPosition.clone().sub(htCenter);
+    const chosenAngle = Math.atan2(toChosen.dot(htW), toChosen.dot(htU));
+    const normalizeAngle = (a) => {
+      let x = a % (Math.PI * 2);
+      if (x > Math.PI) x -= Math.PI * 2;
+      if (x < -Math.PI) x += Math.PI * 2;
+      return x;
+    };
+    const htDir = Math.abs(normalizeAngle(chosenAngle - HT_ROTATE)) <= Math.abs(normalizeAngle(chosenAngle + HT_ROTATE)) ? 1 : -1;
+    const htEndAngle = htDir * HT_ROTATE;
+
+    const lastArmPoint = nextArmFrames[0].point.clone().addScaledVector(nextArmFrames[0].normal, hoverFrac * R);
+    const lastArmNormal = nextArmFrames[0].normal;
+
+    // Zoom out from the tip (b) just landed on, easing from the arm's own
+    // tip speed toward the flourish's slower "maneuvering" pace. The gaze
+    // bias is applied at FULL strength immediately (not eased in with `t`
+    // the way position/normal are) - right as the zoom begins, the camera
+    // is still looking tangent-forward along the arm it just left, which
+    // can be 80+ degrees off from the horn-triangle center; a fixed
+    // world-space offset that size doesn't reliably win out over the
+    // default lookahead until `t` has grown substantially, leaving several
+    // early samples looking at empty space. Snapping to "look at the
+    // pivot" immediately reads fine at flyover speed and is what actually
+    // keeps every sample on-frame.
+    const htZoomSamples = 14;
+    for (let i = 1; i <= htZoomSamples; i++) {
+      const t = smoothstep(i / htZoomSamples);
+      const pos = lastArmPoint.clone().lerp(htOrbitPoint(0, htOrbitHeight), t);
+      const normal = lastArmNormal.clone().lerp(htNormal, t).normalize();
+      const speed = ARM_TIP_SPEED + (ARC_SLOW_SPEED - ARM_TIP_SPEED) * t;
+      const offset = htLookAtCenterOffset(0, htOrbitHeight);
+      pushPoint(pos, normal, offset, speed);
+    }
+
+    // Orbit the fixed 120 degrees at constant height, gaze locked onto the
+    // horn-triangle's own center.
+    const htCruiseSamples = 40;
+    for (let i = 1; i <= htCruiseSamples; i++) {
+      const angle = htEndAngle * (i / htCruiseSamples);
+      const offset = htLookAtCenterOffset(angle, htOrbitHeight);
+      pushPoint(htOrbitPoint(angle, htOrbitHeight), htNormal.clone(), offset, ARC_SLOW_SPEED);
+    }
+
+    // Descend back down onto the neighboring star's tip - the exact same
+    // point/normal (d) below starts its own zoom-out from, and the next
+    // hop's step (a) starts from too. Speed ramps up to ARC_EMERGE_SPEED,
+    // "emerging" back onto the main surface - the pace (d)'s own zoom-out
+    // continues easing off, exactly like the old arc's tail used to. The
+    // gaze offset needs to reach exactly zero by the end (so the arrival
+    // hands off cleanly to plain tangent-forward arm flight), but easing it
+    // out LINEARLY left the same kind of under-corrected middle stretch the
+    // zoom-out above had - `1 - t^2` holds the correction much closer to
+    // full strength through most of the descent and only relaxes it in the
+    // final stretch, right as position/normal are themselves converging on
+    // the target anyway.
+    const htDescendSamples = 16;
+    for (let i = 1; i <= htDescendSamples; i++) {
+      const t = smoothstep(i / htDescendSamples);
+      const pos = htOrbitPoint(htEndAngle, htOrbitHeight).lerp(targetPoint, t);
+      const normal = htNormal.clone().lerp(targetNormal, t).normalize();
+      const speed = ARC_SLOW_SPEED + (ARC_EMERGE_SPEED - ARC_SLOW_SPEED) * t;
+      const offset = htLookAtCenterOffset(htEndAngle, htOrbitHeight).multiplyScalar(1 - t * t);
+      pushPoint(pos, normal, offset, speed);
+    }
+
+    // (d) orbit flourish: having just arrived on `chosenLabel`'s star, pull
+    // up and out again, sweep ~4/5 of the way around that whole face while
+    // looking down at it from above, then spend the remaining ~1/5 of the
+    // turn descending back down to the exact hover point/normal the next
+    // hop's arm traversal starts from - so the loop stays perfectly
+    // continuous into (a) above, next time through, with no seam.
     // Kept modest: the face's own "radius" (R_out) already reaches past the
     // star's tips, and faces sit close together around the dodecahedron, so
     // even a lift of one whole R_out along the face normal is enough to
@@ -588,17 +669,23 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
     // grazing it at the frame edge.
     const lookAtCenterOffset = (angle, height) => orbitFace.center.clone().sub(orbitPoint(angle, height)).multiplyScalar(1.4);
 
-    // Zoom out + tilt down: blend from the arc's landing spot/normal up to
-    // the wide orbit position/attitude, easing the fast "emerging" speed
-    // back down to the default cruising pace, and easing the gaze from
-    // plain forward-hugging flight into the orbit's "look at the star" bias.
+    // Zoom out + tilt down: blend from (c)'s landing spot/normal (the tip
+    // itself) up to the wide orbit position/attitude, easing the fast
+    // "emerging" speed (c)'s own descent ended on back down to the default
+    // cruising pace. The gaze offset is applied at full strength from the
+    // start (not eased in with `t`) - right as this zoom begins, the
+    // camera is still looking tangent-forward off the tip, up to ~90
+    // degrees from the face center; measured directly (a black-frame
+    // report traced to exactly this spot), an offset eased in linearly
+    // doesn't reliably outweigh that default lookahead until well into the
+    // zoom, leaving several early samples looking at empty space.
     const zoomSamples = 16;
     for (let i = 1; i <= zoomSamples; i++) {
       const t = smoothstep(i / zoomSamples);
-      const pos = lastArcPoint.clone().lerp(orbitPoint(tipAngle, orbitHeight), t);
-      const normal = lastArcNormal.clone().lerp(orbitFace.normal, t).normalize();
+      const pos = targetPoint.clone().lerp(orbitPoint(tipAngle, orbitHeight), t);
+      const normal = targetNormal.clone().lerp(orbitFace.normal, t).normalize();
       const speed = ARC_EMERGE_SPEED + (1 - ARC_EMERGE_SPEED) * t;
-      const offset = lookAtCenterOffset(tipAngle, orbitHeight).multiplyScalar(t);
+      const offset = lookAtCenterOffset(tipAngle, orbitHeight);
       pushPoint(pos, normal, offset, speed);
     }
 
@@ -615,11 +702,13 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
 
     // Descend + tilt back up: spend the remaining ~1/5 of the turn easing
     // position/normal back down to the default hover state - and easing the
-    // gaze's "look at center" bias back to zero in step, so it hands off
-    // smoothly to the next hop's plain forward-hugging look. Stops just
-    // short of an exact position match so the next hop's first arm sample
-    // (which IS that exact point) supplies the seam without a duplicate
-    // control point.
+    // gaze's "look at center" bias back to zero, so it hands off smoothly
+    // to the next hop's plain forward-hugging look. Stops just short of an
+    // exact position match so the next hop's first arm sample (which IS
+    // that exact point) supplies the seam without a duplicate control
+    // point. `1 - t^2` (not linear) holds the gaze correction close to full
+    // strength through most of the descent, only relaxing it in the final
+    // stretch - the same under-correction the zoom-out above had, mirrored.
     const descendSamples = 24;
     const descendSpan = Math.PI * 2 - cruiseSpan;
     const cruiseEndAngle = tipAngle + cruiseSpan;
@@ -629,7 +718,7 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, params) {
       const angle = cruiseEndAngle + descendSpan * (i / descendDenom);
       const pos = orbitPoint(angle, orbitHeight).lerp(targetPoint, t);
       const normal = orbitFace.normal.clone().lerp(targetNormal, t).normalize();
-      const offset = lookAtCenterOffset(angle, orbitHeight).multiplyScalar(1 - t);
+      const offset = lookAtCenterOffset(angle, orbitHeight).multiplyScalar(1 - t * t);
       pushPoint(pos, normal, offset, 1);
     }
 
@@ -775,7 +864,7 @@ function rebuild() {
   // every tip/horn-arc present - meaningless (and error-prone) in
   // single-face mode, where most of that geometry is deliberately absent.
   if (!params.singleFaceMode) {
-    ({ curve: flyoverCurve, lookOffsets: flyoverLookOffsets, normals: flyoverNormals, speedMultipliers: flyoverSpeedMultipliers } = buildFlyoverPath(star2D, faces, tipsByLabel, connections, params));
+    ({ curve: flyoverCurve, lookOffsets: flyoverLookOffsets, normals: flyoverNormals, speedMultipliers: flyoverSpeedMultipliers } = buildFlyoverPath(star2D, faces, tipsByLabel, connections, threeCycles, params));
   } else {
     flyoverCurve = null;
   }
@@ -1042,7 +1131,7 @@ window.addEventListener('keydown', (e) => {
       flyoverSpeedBeforePause = params.flyoverSpeed;
       params.flyoverSpeed = 0;
     } else {
-      params.flyoverSpeed = flyoverSpeedBeforePause || 0.33;
+      params.flyoverSpeed = flyoverSpeedBeforePause || 0.03;
       flyoverSpeedBeforePause = null;
     }
     syncControl('flyoverSpeed');
