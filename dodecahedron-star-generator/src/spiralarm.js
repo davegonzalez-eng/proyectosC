@@ -1631,20 +1631,21 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
       indices.push(s0, s2, s1, s1, s2, s3);
     }
   }
-  // Cap both ends - left open they're hollow rectangular tube mouths.
-  // The start (t=0) cap: wherever the ribbon doesn't perfectly cover the
-  // star's own arm surface underneath it (unavoidable with a simple
-  // 4-vertex cross-section against a curved, perforated mesh), a gap lets
-  // you see straight into that opening, reading as "the connector end
-  // looks like a hollow rectangle" rather than solid material. The end
-  // (t=1) cap matters more now that `endWidthFrac` widens rather than
-  // narrows the ribbon - left open, the much bigger mouth at the shared
-  // center would read as a gaping hole right where the three strips are
-  // meant to fuse together (`sculptureMaterial` is double-sided, so
-  // winding direction doesn't matter for visibility either way).
+  // Cap only the start (t=0) end - wherever the ribbon doesn't perfectly
+  // cover the star's own arm surface underneath it (unavoidable with a
+  // simple 4-vertex cross-section against a curved, perforated mesh), a gap
+  // there lets you see straight into an open tube mouth, reading as "the
+  // connector end looks like a hollow rectangle" rather than solid material.
+  // The end (t=1) cap was added on the same reasoning when `endWidthFrac`
+  // started widening the ribbon instead of narrowing it, but with three
+  // ribbons now flaring wide and converging from three different angles
+  // right there, a single FLAT quad capping each one individually reads as
+  // an odd, unperforated bright plate poking out of the fused hub rather
+  // than blending in (reported as "a trapezoid-like surface that is
+  // popping") - removed. The three ribbons' own solid bodies converging
+  // from different directions already close up that shared space without
+  // it.
   indices.push(0, 1, 2, 0, 2, 3);
-  const endBase = segments * ring;
-  indices.push(endBase, endBase + 2, endBase + 1, endBase, endBase + 3, endBase + 2);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));

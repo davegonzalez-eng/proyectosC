@@ -2370,6 +2370,35 @@ whether the rim's own edge normals (computed from a separate BufferGeometry
 than the slab's) create any visible seam line despite the two surfaces
 being positioned exactly coincident there.
 
+## 40. Removed the ribbon's flat end cap - it was the "trapezoid" artifact at the hub
+
+Screenshot feedback on §39: a bright, unperforated trapezoid-like plate was
+popping out right at the three-way hub where the ribbons converge, despite
+the width/thickness matching looking otherwise correct.
+
+Root cause: `buildSpiralVortexRibbonArm` capped BOTH ends of the ribbon's
+tube (a flat quad at t=0 and another at t=1) to avoid a "hollow tube mouth"
+look. The t=1 cap was added back when `endWidthFrac` started widening
+rather than narrowing the ribbon, on the reasoning that the much bigger
+opening there would otherwise read as a gap. But a flat, single quad has no
+hex perforation of its own (the alphaMap's texel density at that patch
+doesn't happen to land on a hole), and with three ribbons now flaring wide
+and converging on the same point from three different angles, three of
+these flat unperforated plates stacked there read as an odd, out-of-place
+add-on rather than blending into the fused hub - exactly the reported
+artifact.
+
+Fix: removed the t=1 cap entirely, keeping only the t=0 one (still needed -
+that end sits right against the arm's own surface, where a gap would still
+read as "hollow rectangle"). The three ribbons' own solid bodies, converging
+into each other from different directions at the hub, already close up that
+shared space without an individual flat cap on each one.
+
+Verified: zero console errors on Thick Bands after the change; a close-up
+screenshot at the same hub region was queued to directly confirm the plate
+is gone but had not completed by the time this round was pushed (recurring
+headless-environment slowness, consistent with prior rounds).
+
 ## File layout
 
 ```
