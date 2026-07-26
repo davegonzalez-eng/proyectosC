@@ -1512,17 +1512,21 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
   const {
     segments = 48,
     startWidth = 0.08,
-    endWidthFrac = 0.35,
+    // >1 now WIDENS toward the shared center instead of narrowing - three
+    // strips flaring out and fusing into one broad, flat hub where they
+    // meet, Mercedes-Benz tristar style, instead of tapering down to a
+    // near-point. Value is relative to `startWidth`, at the tip end.
+    endWidthFrac = 1.4,
     thickness = 0.012,
-    // Fixed quarter-turn (not user-exposed): at the tip the ribbon's flat
-    // face lies roughly tangent to the sphere (face normal ~radial, so the
-    // ribbon reads as flush with the surface, continuing the arm); ramping
-    // a 90-degree twist in by the time it reaches the shared center flips
-    // that so the face normal ends up roughly tangent instead - the ribbon
-    // stands edge-on (perpendicular) to the line from the sphere's center
-    // through the meeting point there, per request, rather than lying
-    // flat (parallel) against it the way the un-twisted frame would.
-    halfTwists = 0.5,
+    // Fixed at 0 (not user-exposed): the ribbon's flat face stays flush
+    // with the local surface the whole way from tip to center (face normal
+    // roughly radial throughout - "flat, perpendicular to the radius of
+    // the sphere" at the meeting point, per request), rather than twisting
+    // up into an edge-on fin there. Keeping the same orientation the arm
+    // itself has all the way through the join is also what makes the
+    // fusion with the arm read as one continuous surface instead of a
+    // sudden reorientation right where they meet.
+    halfTwists = 0,
   } = options;
   const pointAt = spiralVortexPointAt(tip, center, options);
   const endWidth = startWidth * endWidthFrac;
@@ -1576,10 +1580,12 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     const rMajor = major.clone().multiplyScalar(cosA).addScaledVector(minor, sinA);
     const rMinor = minor.clone().multiplyScalar(cosA).addScaledVector(major, -sinA);
 
-    // Smoothstep (not linear) taper: stays close to full width longer near
-    // the tip - more coverage right where the ribbon meets the arm, per
-    // the request to make that junction read as "fused" rather than a
-    // sudden narrow stem - then narrows faster approaching the center.
+    // Smoothstep (not linear) taper: stays close to `startWidth` longer
+    // near the tip - so the join still starts out matched to the arm's own
+    // width instead of an abrupt jump - then flares out faster approaching
+    // the center, where `endWidthFrac` > 1 now widens it well past
+    // `startWidth` instead of narrowing it, so the three strips fan out
+    // and fuse into one broad hub at the meeting point.
     const widthT = t * t * (3 - 2 * t);
     const halfW = THREE.MathUtils.lerp(startWidth, endWidth, widthT) / 2;
     const c0 = p.clone().addScaledVector(rMajor, -halfW).addScaledVector(rMinor, -halfThick);
@@ -1607,14 +1613,20 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
       indices.push(s0, s2, s1, s1, s2, s3);
     }
   }
-  // Cap the start (t=0) end - left open it's a hollow rectangular tube, and
-  // wherever the ribbon doesn't perfectly cover the star's own arm surface
-  // underneath it (unavoidable with a simple 4-vertex cross-section against
-  // a curved, perforated mesh), a gap lets you see straight into that
-  // opening, reading as "the connector end looks like a hollow rectangle"
-  // rather than solid material (`rimMaterial` is double-sided, so winding
-  // direction doesn't matter for visibility).
+  // Cap both ends - left open they're hollow rectangular tube mouths.
+  // The start (t=0) cap: wherever the ribbon doesn't perfectly cover the
+  // star's own arm surface underneath it (unavoidable with a simple
+  // 4-vertex cross-section against a curved, perforated mesh), a gap lets
+  // you see straight into that opening, reading as "the connector end
+  // looks like a hollow rectangle" rather than solid material. The end
+  // (t=1) cap matters more now that `endWidthFrac` widens rather than
+  // narrows the ribbon - left open, the much bigger mouth at the shared
+  // center would read as a gaping hole right where the three strips are
+  // meant to fuse together (`sculptureMaterial` is double-sided, so
+  // winding direction doesn't matter for visibility either way).
   indices.push(0, 1, 2, 0, 2, 3);
+  const endBase = segments * ring;
+  indices.push(endBase, endBase + 2, endBase + 1, endBase, endBase + 3, endBase + 2);
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
@@ -1637,10 +1649,22 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
     spiralLengthMultiplier = 1,
     spiralRibbonWidthFrac = 0.09,
     spiralRibbonThicknessFrac = 0.012,
+    bandHalfWidth = 0.22,
+    tipWidthFrac = 0.15,
   } = params;
   const center = hornTriangleCenter(tipA, tipB, tipC);
   const group = new THREE.Group();
-  const startWidth = R * spiralRibbonWidthFrac;
+  // The ribbon's own start width, floored at the arm's own true width at
+  // the tip (same formula `buildSolidStar2D` uses for its narrowest,
+  // theta=0 end: `bandHalfWidth * tipWidthFrac`, full width = x2). Without
+  // this floor a narrow `spiralRibbonWidthFrac` left the ribbon covering
+  // only part of the arm's own tip cross-section, so whatever the arm's
+  // surface trim (see armTrims) cut away on either side of that narrower
+  // strip had nothing covering it - reported as the arm surface
+  // "disintegrating" right before the connection instead of staying one
+  // consistent surface into the fuse point.
+  const armTipFullWidth = 2 * R * bandHalfWidth * tipWidthFrac;
+  const startWidth = Math.max(R * spiralRibbonWidthFrac, armTipFullWidth);
   const thickness = R * spiralRibbonThicknessFrac;
   for (const tip of [tipA, tipB, tipC]) {
     const geom = buildSpiralVortexRibbonArm(tip, center, {

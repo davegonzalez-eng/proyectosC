@@ -1193,7 +1193,7 @@ const PRESET_HINTS = {
   print3d: 'One detailed face at a time, sized for a real print - peg + socket friction-fit joints (small hub piece per vertex) instead of the fused horn arc. Pick which face with the slider below.',
   starOdyssey: "Same stars as #1, but every horn-triangle arc is replaced by a 3-way spiral funnel converging at that vertex's center.",
   odysseyThicker: 'Star Odyssey with wider, chunkier tips and a smaller hub - a second live-tuned variant.',
-  odysseyThickBands: 'Star Odyssey with the spiral connectors as flat, wide ribbons instead of tapered tubes, standing perpendicular to the sphere at the shared vertex center where the three bands meet.',
+  odysseyThickBands: 'Star Odyssey with the spiral connectors as flat, wide ribbons instead of tapered tubes, flush with the sphere and flaring out into one broad fused hub - Mercedes tristar style - at the shared vertex center where the three bands meet.',
 };
 // Each connector style has its own shape sliders (the horn arc's
 // length/depth/clothoid params mean nothing to the spiral vortex, and vice

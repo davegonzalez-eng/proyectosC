@@ -2195,6 +2195,65 @@ exact crop the user's own reference screenshots used, so a final check
 against the user's own close-up angle is still worth doing on the next
 round if anything still looks off there specifically.
 
+## 37. Mercedes-tristar-style widened connectors + arm-matched tip fusion
+
+Follow-up on §36: the three ribbons were still meeting at close to a single
+narrow point, and the star arm read as "disintegrating" right before each
+connection instead of staying one consistent surface into the fuse point.
+User asked for inspiration from the Mercedes-Benz logo: three flat strips,
+each perpendicular to the sphere's radius at the point they meet, fusing
+into one visibly wider hub there (4-6x the previous width).
+
+**Flipped the width taper.** `buildSpiralVortexRibbonArm`'s `endWidthFrac`
+previously narrowed the ribbon from `startWidth` at the tip down to 35% of
+that at the shared center. It's now 1.4 - the ribbon WIDENS toward the
+center instead, flaring the three strips out into one broad hub where they
+converge, rather than tapering to a near-point. Both ends are now capped
+(previously only the tip end was) since the far end is a much bigger
+opening now that it's the wide end rather than the narrow one - left open
+it would have read as a gaping hole right at the fuse point.
+
+**Removed the twist.** The ribbon previously carried a fixed quarter-turn
+(`halfTwists = 0.5`) ramped in from tip to center, flipping its flat face
+from flush-with-the-surface (normal ~radial) at the tip to edge-on
+(normal ~tangential, standing up like a fin) at the center - a
+previous-round request. The new request is the opposite: "flat, perpendicular
+to the radius of the sphere ... at that point" describes a plane whose
+NORMAL is the radius - i.e. flush with the local tangent plane, the same
+orientation the tip already has, all the way through. `halfTwists` is now
+0, so the ribbon keeps one consistent orientation for its entire length
+instead of rotating away from the arm's own orientation partway through -
+which also directly helps the "disintegrating" complaint, since the join
+no longer reorients right at the seam.
+
+**Floored the ribbon's tip-side width at the arm's own true width.** Checked
+the numbers behind the "disintegrating" report: Thick Bands' arm tip full
+width is `2 * R * bandHalfWidth * tipWidthFrac` (bandHalfWidth 0.305,
+tipWidthFrac 0.57) ≈ 0.35R, while the ribbon's own `startWidth` (from
+`spiralRibbonWidthFrac`, 0.135) was only ≈0.135R - under 40% of the arm's
+own width at the exact point they're supposed to fuse. Whatever the arm's
+own surface trim (§35/§36) left in place outside that narrower ribbon had
+nothing covering it, which is what actually read as the surface
+disintegrating rather than staying one consistent piece. `startWidth` is
+now `Math.max(R * spiralRibbonWidthFrac, armTipFullWidth)`, so the ribbon
+can never be narrower than the arm it's fusing with regardless of the
+slider - self-correcting if `bandHalfWidth`/`tipWidthFrac` get retuned
+later rather than a one-off magic number. The "Ribbon width" slider's max
+was raised from 0.18 to 0.5 in the HTML so it stays usable now that the
+floor sits above its old ceiling for this preset.
+
+Verified in headless Chromium: zero console errors on Thick Bands after
+each change. A pixel-diff between the pre- and post-change default-view
+screenshots shows real, substantial silhouette changes concentrated at the
+horn-triangle junctions (not noise), and side-by-side crops of the same
+screen region show the central three-way junction reading as a visibly
+wider, more solid fused plate with less of a bare seam/gap than before.
+Interactive drag-to-orbit-then-zoom scripts to get an even closer, exact
+match to the user's own framing kept timing out in this session's headless
+environment (a recurring flakiness issue, not a sign of a code problem) -
+worth a closer look on the next round if the flare or fusion still isn't
+reading as intended from other angles.
+
 ## File layout
 
 ```
