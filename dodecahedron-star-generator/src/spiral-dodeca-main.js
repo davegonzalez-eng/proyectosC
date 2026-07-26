@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections, computeThreeCycles } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeArmTakeoverPoints, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup } from './spiralarm.js';
 import { createPerforationTexture, createCoralMazeTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -458,39 +458,6 @@ const PRESETS = {
     // instead (see buildSpiralVortexRibbonGroup/computeRibbonFrames), so
     // this number no longer needs to reach the arm's own ~0.348 for the
     // two surfaces to meet cleanly.
-    spiralRibbonWidthFrac: 0.11, spiralRibbonThicknessFrac: 0.03,
-    material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
-    lampMode: false, lampIntensity: 19,
-  },
-  // "Star Odyssey - Thick Bands 2": every previous round's join-smoothness
-  // issue (ear lobes, shattering, width/thickness mismatches, overlapping
-  // hub artifacts) came from reconciling TWO independently-built surfaces -
-  // the star arm's own field-based, exponentially tip-bent geometry, and
-  // the connector's separately-built analytic curve - at a seam near the
-  // tip, exactly where the arm's own distortion is steepest. This variant
-  // sidesteps that at the root: `armTakeoverFrac` moves the connector's own
-  // reference point well INBOARD of the tip (computeArmTakeoverPoints,
-  // instead of computeArmTips), so the connector's smooth curve takes over
-  // that entire outer stretch of the arm - including the whole tip region -
-  // rather than grafting onto a short stub past it. Per request: "come from
-  // the connection ribbons and curve to land on the star hub" instead of
-  // the other way around.
-  odysseyThickBands2: {
-    starRotationDeg: 14, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.14,
-    bandHalfWidth: 0.305, tipWidthFrac: 0.57, widthTaperPower: 0.9,
-    thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
-    tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
-    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
-    showExtensions: true, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
-    fieldGrid: 144,
-    singleFaceMode: false, connectorStyle: 'spiralRibbon', snapEnabled: false,
-    spiralTurns: 0.1, spiralSweepFrac: 0.02,
-    // launchFrac/lengthMultiplier no longer control how far back the
-    // connector reaches - `armTakeoverFrac` does that directly, as a
-    // fraction of the arm's own arc length in from the tip. Left at their
-    // "start exactly at the reference point" defaults.
-    spiralLaunchFrac: 0, spiralLengthMultiplier: 1,
-    armTakeoverFrac: 0.35,
     spiralRibbonWidthFrac: 0.11, spiralRibbonThicknessFrac: 0.03,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: false, lampIntensity: 19,
@@ -945,18 +912,8 @@ function rebuild() {
   // computed first. Full per-face meshes overwrite nothing here; they just
   // reuse `arms` off `mapSolidStarToFace`'s own return, which is the same
   // data computed the same way.
-  // "Star Odyssey - Thick Bands 2": `armTakeoverFrac` > 0 switches this
-  // reference point from the arm's own true tip to a point further inboard
-  // along the SAME centerline (computeArmTakeoverPoints) - the connector's
-  // curve then starts there instead of at the tip, taking over that whole
-  // outer stretch of the arm (see armTrims below, which cuts the star
-  // sheet at this same point) rather than just grafting onto a short stub
-  // past the tip.
-  const tipSource = (face) => (params.armTakeoverFrac > 0
-    ? computeArmTakeoverPoints(star2D, face, params, params.armTakeoverFrac)
-    : computeArmTips(star2D, face, params));
   for (const face of faces) {
-    for (const arm of tipSource(face)) {
+    for (const arm of computeArmTips(star2D, face, params)) {
       tipsByLabel.set(`F${face.index}-A${arm.armIndex}`, arm);
     }
   }
@@ -971,13 +928,7 @@ function rebuild() {
   const armTrimsByFace = new Map();
   if (params.showExtensions && params.connectorStyle === 'spiralRibbon') {
     const offsetFrac = params.spiralLaunchFrac - (params.spiralLengthMultiplier - 1);
-    // "Thick Bands 2": the reference point is already deep inboard
-    // (computeArmTakeoverPoints), so the star sheet ALWAYS needs trimming
-    // there regardless of offsetFrac's sign - the connector fully replaces
-    // everything from that point outward by design, not just a stub past
-    // the true tip.
-    const takeoverMode = params.armTakeoverFrac > 0;
-    if (offsetFrac < 0 || takeoverMode) {
+    if (offsetFrac < 0) {
       for (const triple of threeCycles) {
         const tips = triple.map((label) => tipsByLabel.get(label));
         if (tips.some((t) => !t)) continue;
@@ -998,14 +949,10 @@ function rebuild() {
           // ribbon's own cross-section - full width here since its
           // smoothstep taper hasn't started narrowing yet this close to its
           // start - sit on top of and hide the ragged cut underneath it.
-          // In takeover mode `offsetFrac` may be 0 or positive (the
-          // connector no longer needs to reach backward past a true tip -
-          // it already starts deep inboard), so the margin is a flat small
-          // constant there instead of derived from `offsetFrac`.
-          const marginFrac = takeoverMode ? 0.04 : Math.min(0.06, -offsetFrac * 0.5);
-          const trimFrac = takeoverMode ? marginFrac : offsetFrac + marginFrac;
+          const marginFrac = Math.min(0.06, -offsetFrac * 0.5);
+          const trimFrac = offsetFrac + marginFrac;
           const point = tip.tipPosition.clone().addScaledVector(tip.tipTangent, trimFrac * trueAxisLen);
-          const trimDist = Math.max(Math.abs(trimFrac), 0.04) * trueAxisLen;
+          const trimDist = -trimFrac * trueAxisLen;
           if (!armTrimsByFace.has(faceIdx)) armTrimsByFace.set(faceIdx, [null, null, null, null, null]);
           armTrimsByFace.get(faceIdx)[armIdx] = {
             point,
@@ -1252,7 +1199,6 @@ const PRESET_HINTS = {
   starOdyssey: "Same stars as #1, but every horn-triangle arc is replaced by a 3-way spiral funnel converging at that vertex's center.",
   odysseyThicker: 'Star Odyssey with wider, chunkier tips and a smaller hub - a second live-tuned variant.',
   odysseyThickBands: 'Star Odyssey with the spiral connectors as flat, wide ribbons instead of tapered tubes, flush with the sphere and flaring out into one broad fused hub - Mercedes tristar style - at the shared vertex center where the three bands meet.',
-  odysseyThickBands2: "Same look as Thick Bands, but built the other way around: the connector's own smooth curve now takes over the whole outer third of each arm (not just a stub past the tip), starting from a point well inboard instead of grafting onto the arm's own tip geometry - aimed at an essentially seamless join.",
 };
 // Each connector style has its own shape sliders (the horn arc's
 // length/depth/clothoid params mean nothing to the spiral vortex, and vice

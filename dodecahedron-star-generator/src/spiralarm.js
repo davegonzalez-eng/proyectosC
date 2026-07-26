@@ -930,16 +930,9 @@ export function mapSolidStarToFace(star2D, face, params = {}, armTrims = null) {
  * @returns {{armIndex: number, tipPosition: THREE.Vector3, tipTangent: THREE.Vector3, tipNormal: THREE.Vector3, tipCurvature: THREE.Vector3}[]}
  */
 export function computeArmTips(star2D, face, params = {}) {
-  const { bandHalfWidth = 0.25, tipWidthFrac = 0.3 } = params;
   const R = star2D.R;
   const place = (u, w) => mapStarPoint(u, w, R, face, params);
   const eps = R * 1e-3;
-  // Half-width of the arm's own solid sheet exactly at the tip (theta=0,
-  // the taper's narrowest point - see buildSolidStar2D's own `halfW`
-  // formula, `widthFrac = tipWidthFrac` there) - a connector meeting the
-  // arm right at its tip needs this exact number to avoid a visible
-  // step/gap in the outline at the seam (see buildSpiralVortexRibbonGroup).
-  const armHalfWidth = R * bandHalfWidth * tipWidthFrac;
   return star2D.tips2D.map(({ tip, prev, prev2 }, armIndex) => {
     const p0 = place(tip.x, tip.y);
     const p1 = place(prev.x, prev.y);
@@ -983,70 +976,7 @@ export function computeArmTips(star2D, face, params = {}) {
     // a peg aimed at `tipPosition` generally misses it.
     const hole2D = star2D.snapHoleCenters2D && star2D.snapHoleCenters2D[armIndex];
     const snapHolePosition = hole2D ? place(hole2D.x, hole2D.y) : null;
-    return { armIndex, tipPosition: p0, tipTangent: tangent, tipNormal, tipCurvature, snapHolePosition, armHalfWidth };
-  });
-}
-
-/**
- * "Star Odyssey - Thick Bands 2" variant of `computeArmTips`: instead of
- * the reference point sitting at the arm's own TRUE tip (theta=0, where the
- * exponential tip-bend distortion is at its steepest and every previous
- * round's join-smoothness issue has come from reconciling the arm's own
- * tip-bent geometry with the connector's separately-built curve), the
- * reference point sits further INBOARD along the same centerline, at
- * `takeoverFrac` of the arm's own arc length in from the tip toward the
- * hub - per request, "come from the connection ribbons and curve to land
- * on the star hub" instead of grafting a connector onto an independently-
- * built tip. Everywhere this function's output stands in for
- * `computeArmTips`'s (tip data used to build the connector's curve AND the
- * arm-trim cut plane), the effect is that the connector's own smooth,
- * analytically-consistent curve construction takes over that entire outer
- * stretch of the arm instead of just the small stub past the true tip -
- * the exponential tip-bend pipeline never gets a say in that region at all,
- * so there's no two-different-surfaces seam left to reconcile there.
- * @param {number} [takeoverFrac=0.35] fraction of the arm's own arc length,
- *   measured from the tip inward, that becomes the connector's territory.
- * @returns {{armIndex: number, tipPosition: THREE.Vector3, tipTangent: THREE.Vector3, tipNormal: THREE.Vector3, tipCurvature: THREE.Vector3, snapHolePosition: null, armHalfWidth: number}[]}
- */
-export function computeArmTakeoverPoints(star2D, face, params = {}, takeoverFrac = 0.35) {
-  const { bandHalfWidth = 0.25, tipWidthFrac = 0.3, widthTaperPower = 1 } = params;
-  const R = star2D.R;
-  const place = (u, w) => mapStarPoint(u, w, R, face, params);
-  const eps = R * 1e-3;
-  const bandHW = R * bandHalfWidth;
-  return star2D.armPolylines2D.map((pts, armIndex) => {
-    // Arc length along the RAW 2D centerline (same measure
-    // `buildSolidStar2D` uses for its own width taper) - needed because the
-    // polyline's points are even in angle/theta, not in arc length, so an
-    // index-fraction alone would land at the wrong physical distance in.
-    const cum = [0];
-    for (let i = 1; i < pts.length; i++) {
-      cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
-    }
-    const total = cum[cum.length - 1] || 1;
-    const targetLen = takeoverFrac * total;
-    let idx = cum.findIndex((c) => c >= targetLen);
-    if (idx < 0) idx = pts.length - 1;
-    idx = Math.min(Math.max(idx, 0), pts.length - 3);
-    const tip = pts[idx], prev = pts[idx + 1], prev2 = pts[idx + 2];
-    const p0 = place(tip.x, tip.y);
-    const p1 = place(prev.x, prev.y);
-    const p2 = place(prev2.x, prev2.y);
-    const tangent = p0.clone().sub(p1).normalize();
-    const pu = place(tip.x + eps, tip.y).sub(place(tip.x - eps, tip.y));
-    const pw = place(tip.x, tip.y + eps).sub(place(tip.x, tip.y - eps));
-    const tipNormal = new THREE.Vector3().crossVectors(pu, pw);
-    if (tipNormal.lengthSq() < 1e-16) tipNormal.copy(p0).normalize();
-    else tipNormal.normalize();
-    if (tipNormal.dot(face.normal) < 0) tipNormal.negate();
-    // Local half-width AT the takeover point, from the same taper formula
-    // buildSolidStar2D uses (`lerp(tipWidthFrac, 1, (arcFrac)^widthTaperPower)`)
-    // rather than the tip-only `tipWidthFrac` constant - the arm is
-    // meaningfully wider here than right at its tip, and the connector
-    // needs the REAL number to match without a step at the seam.
-    const arcFrac = cum[idx] / total;
-    const armHalfWidth = bandHW * THREE.MathUtils.lerp(tipWidthFrac, 1, Math.pow(arcFrac, widthTaperPower));
-    return { armIndex, tipPosition: p0, tipTangent: tangent, tipNormal, tipCurvature: new THREE.Vector3(), snapHolePosition: null, armHalfWidth };
+    return { armIndex, tipPosition: p0, tipTangent: tangent, tipNormal, tipCurvature, snapHolePosition };
   });
 }
 
@@ -1637,26 +1567,11 @@ function computeRibbonFrames(tip, center, options = {}) {
 
     // Smoothstep (not linear) taper: stays close to `startWidth` longer
     // near the tip, then flares out faster approaching the center, where
-    // `endWidthFrac` > 1 widens it well past `startWidth` instead of
-    // narrowing it, so the three strips fan out toward one broad hub at
-    // the meeting point - BUT all three curves converge to the exact same
-    // 3D point there (`center`), so leaving them at full flared width all
-    // the way to t=1 makes their now-substantial volumes overlap each
-    // other right at that point. Three differently-oriented overlapping
-    // opaque slabs read as an odd, flat-looking patch stacked over the
-    // fused hub (reported as "a trapezoid-like surface that is popping" -
-    // confirmed by a diagnostic that color-coded each of the three ribbons
-    // separately and found solid overlapping regions right where they
-    // meet). `pointyFactor` tapers width down to an actual POINT over the
-    // last 12% of the curve - like three wide wedges/petals converging to
-    // one shared vertex (the real Mercedes tristar's own blades are
-    // pointed at the hub, not blunt) - so there's no width left to overlap
-    // with by the time the curves actually coincide.
+    // `endWidthFrac` > 1 now widens it well past `startWidth` instead of
+    // narrowing it, so the three strips fan out and fuse into one broad
+    // hub at the meeting point.
     const widthT = t * t * (3 - 2 * t);
-    const taperHalfWFlared = THREE.MathUtils.lerp(startWidth, endWidth, widthT) / 2;
-    const pointyStart = 0.88;
-    const pointyFactor = t > pointyStart ? Math.max(0, (1 - t) / (1 - pointyStart)) : 1;
-    const taperHalfW = taperHalfWFlared * pointyFactor;
+    const taperHalfW = THREE.MathUtils.lerp(startWidth, endWidth, widthT) / 2;
     const halfW = armHalfWidth ? THREE.MathUtils.lerp(armHalfWidth, taperHalfW, blendT) : taperHalfW;
     const halfThick = armHalfThickness
       ? THREE.MathUtils.lerp(armHalfThickness, halfThickTarget, blendT)
@@ -1815,24 +1730,25 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
     spiralRibbonWidthFrac = 0.09,
     spiralRibbonThicknessFrac = 0.012,
     thickness: armThicknessFrac = 0.015,
+    bandHalfWidth = 0.22,
+    tipWidthFrac = 0.15,
     ribbonRimWidthFrac = 0.22,
     ribbonRimProudFrac = 0.006,
   } = params;
   const center = hornTriangleCenter(tipA, tipB, tipC);
   const group = new THREE.Group();
   // `spiralRibbonWidthFrac` is the ribbon's own INTRINSIC width, used away
-  // from the tip - right at the seam (t=0) `computeRibbonFrames` blends it
-  // to `tip.armHalfWidth` instead (the arm's own true half-width AT
-  // whichever reference point this tip data was computed for - the true
-  // tip via `computeArmTips`, or further inboard via
-  // `computeArmTakeoverPoints` for the "Thick Bands 2" preset) so the two
+  // from the tip - right at the tip (t=0) `computeRibbonFrames` blends it
+  // to `armHalfWidth` instead (the arm's own true half-width there, same
+  // formula `buildSolidStar2D` uses for its narrowest end) so the two
   // surfaces' widths actually match at the seam rather than stepping.
   const startWidth = R * spiralRibbonWidthFrac;
   const thickness = R * spiralRibbonThicknessFrac;
+  const armHalfWidth = R * bandHalfWidth * tipWidthFrac;
   const armHalfThickness = (R * armThicknessFrac) / 2;
   for (const tip of [tipA, tipB, tipC]) {
     const shared = {
-      armHalfWidth: tip.armHalfWidth || 0,
+      armHalfWidth,
       armHalfThickness,
       turns: spiralTurns,
       sweepFrac: spiralSweepFrac,
