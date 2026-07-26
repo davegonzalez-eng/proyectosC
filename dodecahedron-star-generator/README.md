@@ -2254,6 +2254,57 @@ environment (a recurring flakiness issue, not a sign of a code problem) -
 worth a closer look on the next round if the flare or fusion still isn't
 reading as intended from other angles.
 
+## 38. Ribbon width slider made authoritative again + fixed the real cause of the arm-side "shattering"
+
+Two follow-ups from screenshots of §37's wider connectors: the star surface
+right at the connection still looked "shattered"/"stretched", like the
+texture was tearing apart, and the "Ribbon width" slider (already present,
+`spiralRibbonWidthFrac`) needed a lower default with real effect - it had
+none, because §37 floored the ribbon's start width at the arm's own tip
+width, which sat above the slider's usable range for this preset.
+
+**Root-caused the shattering.** Close-up crops of the current (already-
+pushed) state show a patch of scattered bright/dark slivers right where the
+arm's surface trim (§35) leaves a short overlap strip of the arm's own slab
+for the ribbon to visually cover (§36's `marginFrac`) - everywhere else on
+the sheet, away from a connection, the hex pattern is clean. That pointed
+at the overlap zone specifically, not the trim boundary's raggedness (which
+was already mitigated) or the UV rotation (already fixed for stretching
+elsewhere). The actual cause: the ribbon's curve runs along the SAME
+surface centerline the arm's own slab is centered on, and the arm's slab
+has real thickness (`thickness`, 0.01 for Thick Bands) extending both ways
+from that centerline - same for the ribbon (`spiralRibbonThicknessFrac`,
+0.03, i.e. thicker than the arm's own slab). Two opaque, similarly-oriented
+slabs both centered on the same line and overlapping in space is literal
+geometric interpenetration, not just near-coincident surfaces - which
+renders as flickering, torn-looking fragments exactly where they cross.
+§37's `halfTwists = 0` change (keeping the ribbon flush with the surface
+instead of twisting away from it) made this worse by keeping the ribbon
+parallel to - and so overlapping more of - the arm's slab for longer.
+
+Fixed by lifting the ribbon's cross-section center proud of the surface by
+the arm's own slab half-thickness (plus a small margin) right at the tip,
+fading back to zero over the same first-35%-of-curve stretch the existing
+tip-normal blend already uses (the only span where any arm slab is left to
+clash with in the first place) - `buildSpiralVortexRibbonArm` takes a new
+`armHalfThickness` option, computed in `buildSpiralVortexRibbonGroup` from
+the same `thickness` param the arm's own slab uses.
+
+**Un-floored the width slider.** `spiralRibbonWidthFrac` now controls
+`startWidth` directly again (`buildSpiralVortexRibbonGroup`'s
+`Math.max(..., armTipFullWidth)` floor from §37 is gone) - the shattering
+turned out to be the proud-offset issue above, not width, so the floor
+wasn't fixing what it was blamed for and was just making the slider inert.
+Thick Bands' default is now 0.14, 40% of the ~0.348 the floor had been
+forcing (per request - "40% of what they currently are").
+
+Verified: zero console errors on Thick Bands after both changes. A fresh
+close-up screenshot to directly confirm the shattering is gone at the same
+patch identified above was queued but had not completed by the time this
+round was pushed (the same recurring headless-environment slowness noted
+in prior rounds) - worth a first look on the next round before further
+tuning.
+
 ## File layout
 
 ```

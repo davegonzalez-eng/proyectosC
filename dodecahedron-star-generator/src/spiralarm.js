@@ -1527,6 +1527,23 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     // fusion with the arm read as one continuous surface instead of a
     // sudden reorientation right where they meet.
     halfTwists = 0,
+    // Half-thickness of the star arm's OWN slab (see mapSolidStarToFace's
+    // `halfT`) at the point this ribbon starts. The ribbon's curve runs
+    // along the same surface centerline the arm's own slab is centered on,
+    // and where the arm's surface trim intentionally leaves a short strip
+    // of the arm's own slab behind for the ribbon to visually cover (see
+    // armTrims' marginFrac in rebuild()), a ribbon thicker than that slab -
+    // as the default Thick Bands proportions are - and centered on the very
+    // same line runs INSIDE the arm's own solid geometry there, not just
+    // beside it: two opaque slabs occupying overlapping 3D space, which
+    // renders as flickering/interpenetrating "torn" fragments right at the
+    // seam (reported as the surface "shattering"/"stretched" there). Lifting
+    // the ribbon's own centerline proud of the surface by this amount right
+    // at the tip - fading back to 0 over the same first-35%-of-curve stretch
+    // the tip-normal blend below already uses, since that's the only span
+    // where any arm slab is left to clash with - puts the ribbon cleanly
+    // outside the arm's slab instead of straddling it.
+    armHalfThickness = 0,
   } = options;
   const pointAt = spiralVortexPointAt(tip, center, options);
   const endWidth = startWidth * endWidthFrac;
@@ -1558,6 +1575,13 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     const sphereRadial = p.clone().normalize();
     const radial = tip.tipNormal.clone().lerp(sphereRadial, blendT);
     if (radial.lengthSq() < 1e-10) radial.copy(sphereRadial); else radial.normalize();
+    // Lift the cross-section's center off the surface centerline while any
+    // of the arm's own slab could still be underneath it (see armHalfThickness
+    // above) - a small constant margin on top of the slab's own half-thickness
+    // so the two don't just barely touch.
+    if (armHalfThickness) {
+      p.addScaledVector(radial, armHalfThickness * 1.2 * (1 - blendT));
+    }
     const major = new THREE.Vector3().crossVectors(tangent, radial);
     if (major.lengthSq() < 1e-10) {
       major.set(Math.abs(tangent.x) < 0.9 ? 1 : 0, Math.abs(tangent.x) < 0.9 ? 0 : 1, 0);
@@ -1649,25 +1673,23 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
     spiralLengthMultiplier = 1,
     spiralRibbonWidthFrac = 0.09,
     spiralRibbonThicknessFrac = 0.012,
-    bandHalfWidth = 0.22,
-    tipWidthFrac = 0.15,
+    thickness: armThicknessFrac = 0.015,
   } = params;
   const center = hornTriangleCenter(tipA, tipB, tipC);
   const group = new THREE.Group();
-  // The ribbon's own start width, floored at the arm's own true width at
-  // the tip (same formula `buildSolidStar2D` uses for its narrowest,
-  // theta=0 end: `bandHalfWidth * tipWidthFrac`, full width = x2). Without
-  // this floor a narrow `spiralRibbonWidthFrac` left the ribbon covering
-  // only part of the arm's own tip cross-section, so whatever the arm's
-  // surface trim (see armTrims) cut away on either side of that narrower
-  // strip had nothing covering it - reported as the arm surface
-  // "disintegrating" right before the connection instead of staying one
-  // consistent surface into the fuse point.
-  const armTipFullWidth = 2 * R * bandHalfWidth * tipWidthFrac;
-  const startWidth = Math.max(R * spiralRibbonWidthFrac, armTipFullWidth);
+  // `spiralRibbonWidthFrac` is the ribbon's own start width directly - no
+  // longer floored at the arm's own tip width (a previous-round fix for a
+  // narrow ribbon leaving the arm's trimmed edge exposed beside it, which
+  // also made the width slider have no visible effect once its max sat
+  // below the floor). The actual "shattering"/z-fighting culprit turned out
+  // to be `armHalfThickness` below, not width - keeping the slider
+  // authoritative again lets it do what it says.
+  const startWidth = R * spiralRibbonWidthFrac;
   const thickness = R * spiralRibbonThicknessFrac;
+  const armHalfThickness = (R * armThicknessFrac) / 2;
   for (const tip of [tipA, tipB, tipC]) {
     const geom = buildSpiralVortexRibbonArm(tip, center, {
+      armHalfThickness,
       turns: spiralTurns,
       sweepFrac: spiralSweepFrac,
       launchFrac: spiralLaunchFrac,
