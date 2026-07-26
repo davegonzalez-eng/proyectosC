@@ -2305,6 +2305,71 @@ round was pushed (the same recurring headless-environment slowness noted
 in prior rounds) - worth a first look on the next round before further
 tuning.
 
+## 39. True width/thickness matching at the joint + a rim bead on the ribbon
+
+Follow-up: lower the "Ribbon width" default to 0.11, then make the star arm
+and the ribbon connector actually match in width AND thickness right where
+they meet (not just close), add a small rim/proud bead to the ribbon to
+mirror the star sheet's own finished-edge look, and double-check the two
+surfaces read as one continuous piece - same slope, no gaps - at the joint.
+
+**Shared frame refactor.** The ribbon's per-step curve frame (position,
+tangent, `major`/`minor` cross-section axes) was computed inline inside
+`buildSpiralVortexRibbonArm`. Factored out into `computeRibbonFrames()`,
+called once per ribbon and shared by both the main slab and the new rim
+bead below - the two geometries read the exact same numbers per step, so
+they can't drift apart from each other even as the width tapers/flares
+along the curve. `halfTwists` (dead since it's been fixed at 0 since §37)
+and the old ad-hoc "lift the ribbon proud of the surface" hack (§38) were
+both removed as part of this - true thickness matching (next) replaces
+what the hack was working around.
+
+**Real width/thickness matching, not just closer defaults.**
+`computeRibbonFrames` now blends `halfW` and `halfThick` from the arm's own
+TRUE local values at the tip (`armHalfWidth` = `R * bandHalfWidth *
+tipWidthFrac`, the same formula `buildSolidStar2D` uses for its own
+narrowest end; `armHalfThickness` = the arm's own slab half-thickness) at
+t=0 to the ribbon's own intrinsic `spiralRibbonWidthFrac`/
+`spiralRibbonThicknessFrac` values over the same first-35%-of-curve stretch
+the tip-normal blend already uses. At the seam itself the two surfaces are
+now IDENTICAL in width and thickness - zero step, zero gap - rather than
+approximately close; further along, once there's no more arm surface left
+to clash with, the ribbon settles into its own configured proportions.
+This also turns out to be a cleaner fix for §38's z-fighting than the
+proud-offset hack was: since thickness matches exactly at t=0 and only
+diverges well past where any of the arm's own slab remains (per the
+existing marginFrac overlap reach), there's nothing left to overlap with
+by the time it grows past the arm's own thickness.
+
+**Rim bead.** New `buildSpiralVortexRibbonRim()` builds a small raised bead
+along each of the ribbon's two long edges - `rimProud * sin(PI * s)` within
+a narrow inset of the edge, zero height at both the true edge and the
+fully-inset point, same profile shape `buildStarRim` already uses for the
+star sheet's own boundary - so the two surfaces read as finished the same
+way. Built from the identical shared frames the main slab uses (so its
+edge can never drift off the slab's own edge), as its own separate mesh
+purely additive on top of the slab rather than a change to the slab's own
+cross-section - lower risk of reintroducing a gap in the load-bearing
+surface if the bead ever needs retuning. Not exposed as new sliders yet
+(`ribbonRimWidthFrac`/`ribbonRimProudFrac`, defaults 0.22/0.006) - can add
+controls if the defaults need hand-tuning after a closer look.
+
+Width default for Thick Bands is now 0.11 (`spiralRibbonWidthFrac`), per
+request - since the tip end is matched to the arm automatically now
+regardless of this number, lowering it only affects the ribbon's own
+look further from the tip, not whether the two surfaces meet cleanly.
+
+Verified: zero console errors on Thick Bands after the refactor. A
+close-up screenshot to directly confirm the rim bead reads correctly and
+the joint looks seamless at this new width was queued but had not
+completed by the time this round was pushed (recurring headless-
+environment slowness, consistent with prior rounds) - this is the first
+thing to check next round, particularly whether `rimProud`'s default
+(0.006 x R) reads as a visible bead or is too subtle to notice, and
+whether the rim's own edge normals (computed from a separate BufferGeometry
+than the slab's) create any visible seam line despite the two surfaces
+being positioned exactly coincident there.
+
 ## File layout
 
 ```

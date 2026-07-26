@@ -453,12 +453,12 @@ const PRESETS = {
     // 0.135 width it was reading nearly square, which combined with the
     // ribbon's open ends (see buildSpiralVortexRibbonArm's end cap) looked
     // like "a hollow rectangle" rather than a flat band.
-    // Width: a previous round floored this at the arm's own tip width
-    // (~0.348) to fix an exposed-edge bug, which incidentally made this
-    // number stop mattering. That floor is gone (see
-    // buildSpiralVortexRibbonGroup) and the slider is authoritative again -
-    // set to 40% of that floored width (0.348 x 0.4 ~= 0.14) per request.
-    spiralRibbonWidthFrac: 0.14, spiralRibbonThicknessFrac: 0.03,
+    // Width: this is the ribbon's own INTRINSIC width away from the tip -
+    // right at the tip it's blended to match the arm's own true width
+    // instead (see buildSpiralVortexRibbonGroup/computeRibbonFrames), so
+    // this number no longer needs to reach the arm's own ~0.348 for the
+    // two surfaces to meet cleanly.
+    spiralRibbonWidthFrac: 0.11, spiralRibbonThicknessFrac: 0.03,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: false, lampIntensity: 19,
   },

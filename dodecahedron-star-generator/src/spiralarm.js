@@ -1485,30 +1485,36 @@ export function buildSpiralVortexGroup(tipA, tipB, tipC, params = {}) {
 }
 
 /**
- * Flat-ribbon variant of `buildSpiralVortexArm`: same
- * `spiralVortexPointAt` curve, but extruded with a wide/thin rectangular
- * cross-section instead of a circular one - reads as a band rather than a
- * wire - with an optional progressive twist (`halfTwists`, in units of 180
- * degrees) applied around the curve's own tangent from tip to center,
- * Mobius-strip style ("the star arm twists and becomes the band that meets
- * three other bands at the same point").
+ * Shared per-step Frenet-ish frame the ribbon's main slab AND its rim bead
+ * both build from - factored out so the two geometries can never drift
+ * apart from each other (they read the exact same `p`/`major`/`minor`/
+ * `halfW`/`halfThick` per step), which is what "no gaps, same slope at the
+ * joint" between the two actually requires in practice.
  *
- * The cross-section's own orientation is built the same way
- * `buildHornArc`'s bead is (`major = tangent x radial`, `minor = tangent x
- * major`, using the point's own position as a stand-in for the local
- * outward/radial direction) rather than the tube's arbitrary world-axis
- * fallback - a circular cross-section looks identical no matter how it's
- * rotated, so the tube never needed a "correct" orientation, but a flat
- * ribbon's whole visual identity IS its orientation: this keeps its width
- * roughly in-surface and its thickness roughly radial at every point,
- * matching the flat star sheet the ribbon is meant to be a continuation of.
- * A per-step "don't flip" guard (negate the new major if it points more
- * against the previous step's than with it) stops the frame from
- * momentarily snapping 180 degrees around a cross-product sign ambiguity,
- * which would otherwise show as a sudden visible kink unrelated to the
- * deliberate `halfTwists` twist.
+ * Two joint-matching blends happen here, both against `spiralVortexPointAt`
+ * over the same first-35%-of-curve stretch the tip-normal blend already
+ * uses (`blendT`) - beyond that the connector is well clear of the star's
+ * own geometry and there's nothing left to match:
+ *  - `armHalfWidth`, if given, is the arm's own true half-width at the tip
+ *    (same formula `buildSolidStar2D` uses for its narrowest, theta=0 end).
+ *    Without matching this, a `startWidth` narrower than the arm's actual
+ *    tip width left a visible step/gap in the outline right at the seam.
+ *  - `armHalfThickness`, if given, is the arm's own true half-thickness at
+ *    the tip. The ribbon's curve runs along the SAME surface centerline
+ *    the arm's own slab is centered on, so a ribbon thickness that didn't
+ *    match the arm's right at t=0 meant two differently-thick opaque slabs,
+ *    both centered on that line, overlapping in 3D space right where the
+ *    arm's own surface trim leaves a short strip of its slab behind for the
+ *    ribbon to cover (see armTrims' marginFrac in rebuild()) - rendering as
+ *    flickering "torn" fragments (reported as the surface "shattering").
+ *    Matching thickness exactly at t=0 removes the mismatch at its source,
+ *    and by the time it diverges toward the ribbon's own `thickness`
+ *    further along the curve, curve-arc-length math confirms that span
+ *    (t up to 0.35) is already well past the small margin - so there's no
+ *    arm slab left there to overlap with regardless of how much the
+ *    ribbon's own thickness has grown by then.
  */
-function buildSpiralVortexRibbonArm(tip, center, options = {}) {
+function computeRibbonFrames(tip, center, options = {}) {
   const {
     segments = 48,
     startWidth = 0.08,
@@ -1518,40 +1524,14 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     // near-point. Value is relative to `startWidth`, at the tip end.
     endWidthFrac = 1.4,
     thickness = 0.012,
-    // Fixed at 0 (not user-exposed): the ribbon's flat face stays flush
-    // with the local surface the whole way from tip to center (face normal
-    // roughly radial throughout - "flat, perpendicular to the radius of
-    // the sphere" at the meeting point, per request), rather than twisting
-    // up into an edge-on fin there. Keeping the same orientation the arm
-    // itself has all the way through the join is also what makes the
-    // fusion with the arm read as one continuous surface instead of a
-    // sudden reorientation right where they meet.
-    halfTwists = 0,
-    // Half-thickness of the star arm's OWN slab (see mapSolidStarToFace's
-    // `halfT`) at the point this ribbon starts. The ribbon's curve runs
-    // along the same surface centerline the arm's own slab is centered on,
-    // and where the arm's surface trim intentionally leaves a short strip
-    // of the arm's own slab behind for the ribbon to visually cover (see
-    // armTrims' marginFrac in rebuild()), a ribbon thicker than that slab -
-    // as the default Thick Bands proportions are - and centered on the very
-    // same line runs INSIDE the arm's own solid geometry there, not just
-    // beside it: two opaque slabs occupying overlapping 3D space, which
-    // renders as flickering/interpenetrating "torn" fragments right at the
-    // seam (reported as the surface "shattering"/"stretched" there). Lifting
-    // the ribbon's own centerline proud of the surface by this amount right
-    // at the tip - fading back to 0 over the same first-35%-of-curve stretch
-    // the tip-normal blend below already uses, since that's the only span
-    // where any arm slab is left to clash with - puts the ribbon cleanly
-    // outside the arm's slab instead of straddling it.
+    armHalfWidth = 0,
     armHalfThickness = 0,
   } = options;
   const pointAt = spiralVortexPointAt(tip, center, options);
   const endWidth = startWidth * endWidthFrac;
-  const halfThick = thickness / 2;
+  const halfThickTarget = thickness / 2;
 
-  const positions = [];
-  const uvs = [];
-  const indices = [];
+  const frames = [];
   let prevMajor = null;
   let arcLen = 0;
   let prevP = null;
@@ -1575,13 +1555,6 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     const sphereRadial = p.clone().normalize();
     const radial = tip.tipNormal.clone().lerp(sphereRadial, blendT);
     if (radial.lengthSq() < 1e-10) radial.copy(sphereRadial); else radial.normalize();
-    // Lift the cross-section's center off the surface centerline while any
-    // of the arm's own slab could still be underneath it (see armHalfThickness
-    // above) - a small constant margin on top of the slab's own half-thickness
-    // so the two don't just barely touch.
-    if (armHalfThickness) {
-      p.addScaledVector(radial, armHalfThickness * 1.2 * (1 - blendT));
-    }
     const major = new THREE.Vector3().crossVectors(tangent, radial);
     if (major.lengthSq() < 1e-10) {
       major.set(Math.abs(tangent.x) < 0.9 ? 1 : 0, Math.abs(tangent.x) < 0.9 ? 0 : 1, 0);
@@ -1592,30 +1565,50 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     prevMajor = major;
     const minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
 
-    // Progressive Mobius-style twist around the tangent, eased in with
-    // zero value AND zero slope at the tip (t^2, the same onset shape the
-    // swirl envelope elsewhere in this file uses) so the cross-section
-    // doesn't immediately start rotating away from "flush with the
-    // surface" right at the seam - ramping to `halfTwists` half-turns by
-    // the shared center.
-    const angle = halfTwists * Math.PI * t * t;
-    const cosA = Math.cos(angle);
-    const sinA = Math.sin(angle);
-    const rMajor = major.clone().multiplyScalar(cosA).addScaledVector(minor, sinA);
-    const rMinor = minor.clone().multiplyScalar(cosA).addScaledVector(major, -sinA);
-
     // Smoothstep (not linear) taper: stays close to `startWidth` longer
-    // near the tip - so the join still starts out matched to the arm's own
-    // width instead of an abrupt jump - then flares out faster approaching
-    // the center, where `endWidthFrac` > 1 now widens it well past
-    // `startWidth` instead of narrowing it, so the three strips fan out
-    // and fuse into one broad hub at the meeting point.
+    // near the tip, then flares out faster approaching the center, where
+    // `endWidthFrac` > 1 now widens it well past `startWidth` instead of
+    // narrowing it, so the three strips fan out and fuse into one broad
+    // hub at the meeting point.
     const widthT = t * t * (3 - 2 * t);
-    const halfW = THREE.MathUtils.lerp(startWidth, endWidth, widthT) / 2;
-    const c0 = p.clone().addScaledVector(rMajor, -halfW).addScaledVector(rMinor, -halfThick);
-    const c1 = p.clone().addScaledVector(rMajor, halfW).addScaledVector(rMinor, -halfThick);
-    const c2 = p.clone().addScaledVector(rMajor, halfW).addScaledVector(rMinor, halfThick);
-    const c3 = p.clone().addScaledVector(rMajor, -halfW).addScaledVector(rMinor, halfThick);
+    const taperHalfW = THREE.MathUtils.lerp(startWidth, endWidth, widthT) / 2;
+    const halfW = armHalfWidth ? THREE.MathUtils.lerp(armHalfWidth, taperHalfW, blendT) : taperHalfW;
+    const halfThick = armHalfThickness
+      ? THREE.MathUtils.lerp(armHalfThickness, halfThickTarget, blendT)
+      : halfThickTarget;
+
+    frames.push({ t, p, tangent, major, minor, halfW, halfThick, arcLen });
+  }
+  return frames;
+}
+
+/**
+ * Flat-ribbon variant of `buildSpiralVortexArm`: same
+ * `spiralVortexPointAt` curve, but extruded with a wide/thin rectangular
+ * cross-section instead of a circular one - reads as a band rather than a
+ * wire. The cross-section's own orientation is built the same way
+ * `buildHornArc`'s bead is (`major = tangent x radial`, `minor = tangent x
+ * major`, using the point's own position as a stand-in for the local
+ * outward/radial direction) rather than the tube's arbitrary world-axis
+ * fallback - a circular cross-section looks identical no matter how it's
+ * rotated, so the tube never needed a "correct" orientation, but a flat
+ * ribbon's whole visual identity IS its orientation: this keeps its width
+ * roughly in-surface and its thickness roughly radial at every point,
+ * matching the flat star sheet the ribbon is meant to be a continuation of
+ * (face normal roughly radial for the ribbon's whole length - "flat,
+ * perpendicular to the radius of the sphere" at the meeting point, per
+ * request - rather than twisting up into an edge-on fin there).
+ */
+function buildSpiralVortexRibbonArm(tip, center, options = {}) {
+  const frames = computeRibbonFrames(tip, center, options);
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  for (const { p, major, minor, halfW, halfThick, arcLen } of frames) {
+    const c0 = p.clone().addScaledVector(major, -halfW).addScaledVector(minor, -halfThick);
+    const c1 = p.clone().addScaledVector(major, halfW).addScaledVector(minor, -halfThick);
+    const c2 = p.clone().addScaledVector(major, halfW).addScaledVector(minor, halfThick);
+    const c3 = p.clone().addScaledVector(major, -halfW).addScaledVector(minor, halfThick);
     positions.push(c0.x, c0.y, c0.z, c1.x, c1.y, c1.z, c2.x, c2.y, c2.z, c3.x, c3.y, c3.z);
     // UV in the same physical (world-unit) scale `mapSolidStarToFace`'s own
     // (u,w) uses - u = real arc-length travelled so far, v = position
@@ -1630,6 +1623,7 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
     uvs.push(arcLen, 0, arcLen, halfW * 2, arcLen, halfW * 2, arcLen, 0);
   }
   const ring = 4;
+  const segments = frames.length - 1;
   for (let i = 0; i < segments; i++) {
     for (let k = 0; k < ring; k++) {
       const k1 = (k + 1) % ring;
@@ -1660,6 +1654,67 @@ function buildSpiralVortexRibbonArm(tip, center, options = {}) {
 }
 
 /**
+ * Small decorative rim bead tracking each of the ribbon's two long edges,
+ * riding on top of its outward-facing side - mirrors `buildStarRim`'s own
+ * treatment of the star sheet's boundary (a raised bead within a narrow
+ * inset of the edge, `rimProud * sin(PI * s)` so it peaks mid-band and
+ * meets the flat surface with zero height at both the true edge and the
+ * fully-inset side) for visual consistency between the two surfaces meeting
+ * at each connection, per request. Built from the exact same per-step
+ * frames (`computeRibbonFrames`) the main slab uses, so the bead can never
+ * drift off the slab's own edge even as the width tapers/flares along the
+ * curve. Purely additive on top of the existing slab geometry (own
+ * BufferGeometry, own mesh in the group) rather than a change to the slab's
+ * own cross-section, so it can't reintroduce a gap in the load-bearing
+ * surface if the bead's proportions ever need retuning.
+ */
+function buildSpiralVortexRibbonRim(tip, center, options = {}) {
+  const { rimWidthFrac = 0.22, rimProud = 0.003, rimCrossSamples = 4 } = options;
+  const frames = computeRibbonFrames(tip, center, options);
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  const stationsPerEdge = rimCrossSamples + 1;
+  const ring = stationsPerEdge * 2;
+  for (const { p, major, minor, halfW, halfThick, arcLen } of frames) {
+    // Rim band width is a fraction of the ribbon's OWN current half-width
+    // (not a fixed world size) so it scales down gracefully as the ribbon
+    // narrows toward the tip instead of overrunning a thin cross-section.
+    const rimWidth = Math.min(halfW * rimWidthFrac, halfW * 0.45);
+    for (let side = -1; side <= 1; side += 2) {
+      for (let k = 0; k <= rimCrossSamples; k++) {
+        const s = k / rimCrossSamples;
+        const u = side * (halfW - rimWidth * s);
+        const bump = rimProud * Math.sin(Math.PI * s);
+        const v = p.clone()
+          .addScaledVector(major, u)
+          .addScaledVector(minor, halfThick + bump);
+        positions.push(v.x, v.y, v.z);
+        uvs.push(arcLen, halfW + side * u);
+      }
+    }
+  }
+  const segments = frames.length - 1;
+  for (let i = 0; i < segments; i++) {
+    for (let edge = 0; edge < 2; edge++) {
+      for (let k = 0; k < rimCrossSamples; k++) {
+        const s0 = i * ring + edge * stationsPerEdge + k;
+        const s1 = s0 + 1;
+        const s2 = s0 + ring;
+        const s3 = s1 + ring;
+        indices.push(s0, s2, s1, s1, s2, s3);
+      }
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
  * Ribbon variant of `buildSpiralVortexGroup` - see
  * `buildSpiralVortexRibbonArm` for the shape itself.
  * @returns {THREE.Group}
@@ -1674,21 +1729,25 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
     spiralRibbonWidthFrac = 0.09,
     spiralRibbonThicknessFrac = 0.012,
     thickness: armThicknessFrac = 0.015,
+    bandHalfWidth = 0.22,
+    tipWidthFrac = 0.15,
+    ribbonRimWidthFrac = 0.22,
+    ribbonRimProudFrac = 0.006,
   } = params;
   const center = hornTriangleCenter(tipA, tipB, tipC);
   const group = new THREE.Group();
-  // `spiralRibbonWidthFrac` is the ribbon's own start width directly - no
-  // longer floored at the arm's own tip width (a previous-round fix for a
-  // narrow ribbon leaving the arm's trimmed edge exposed beside it, which
-  // also made the width slider have no visible effect once its max sat
-  // below the floor). The actual "shattering"/z-fighting culprit turned out
-  // to be `armHalfThickness` below, not width - keeping the slider
-  // authoritative again lets it do what it says.
+  // `spiralRibbonWidthFrac` is the ribbon's own INTRINSIC width, used away
+  // from the tip - right at the tip (t=0) `computeRibbonFrames` blends it
+  // to `armHalfWidth` instead (the arm's own true half-width there, same
+  // formula `buildSolidStar2D` uses for its narrowest end) so the two
+  // surfaces' widths actually match at the seam rather than stepping.
   const startWidth = R * spiralRibbonWidthFrac;
   const thickness = R * spiralRibbonThicknessFrac;
+  const armHalfWidth = R * bandHalfWidth * tipWidthFrac;
   const armHalfThickness = (R * armThicknessFrac) / 2;
   for (const tip of [tipA, tipB, tipC]) {
-    const geom = buildSpiralVortexRibbonArm(tip, center, {
+    const shared = {
+      armHalfWidth,
       armHalfThickness,
       turns: spiralTurns,
       sweepFrac: spiralSweepFrac,
@@ -1698,8 +1757,18 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
       thickness,
       // halfTwists intentionally omitted - always the function's own fixed
       // quarter-turn (see buildSpiralVortexRibbonArm), not user-adjustable.
-    });
+    };
+    const geom = buildSpiralVortexRibbonArm(tip, center, shared);
     group.add(new THREE.Mesh(geom));
+    // Small raised bead along each of the ribbon's two long edges, mirroring
+    // the star sheet's own rim treatment (buildStarRim) for visual
+    // consistency between the two surfaces meeting at the connection.
+    const rimGeom = buildSpiralVortexRibbonRim(tip, center, {
+      ...shared,
+      rimWidthFrac: ribbonRimWidthFrac,
+      rimProud: R * ribbonRimProudFrac,
+    });
+    group.add(new THREE.Mesh(rimGeom));
   }
   return group;
 }
