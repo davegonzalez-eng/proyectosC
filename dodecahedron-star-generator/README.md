@@ -2480,6 +2480,47 @@ on together on Stardream #1; screenshot shows all 5 marker colors at once
 (cyan hub rings, yellow hub rectangles, orange edge rectangles, lime arm
 rectangles, magenta tristar-center rectangles) without visual conflicts.
 
+## 43. Repositioned both §42 auxiliary markers per feedback
+
+Both new marker sets were geometrically valid but positioned somewhere
+other than what was actually asked for.
+
+**Tristar arm rectangles** (lime): were sitting right at each bar's tip,
+which read as too far from where the three bars actually connect.
+`buildTristarArmRectsDebug` replaces `buildTristarArmRectDebug` (now takes
+all 3 tips at once, returns 3 geometries instead of 1) - each marker keeps
+its tip's own fixed width/thickness unchanged, but slides straight toward
+the shared center, stopping at the point where all 3 bars' same-size
+cross-sections would just start touching. Since every bar's position
+interpolates toward the exact same `center`, the gap between bar i and bar
+j scales exactly as `(1 - t) * (their tip-to-tip distance)`, giving a
+closed-form `t` with no iteration - the largest `t` across the 3 pairs is
+used for all 3 markers. Verified with a standalone script: rebuilt a real
+triple's 3 markers and confirmed the distance between every pair of marker
+centers exactly equals their shared width (0.0335 both ways to float
+precision) - i.e. genuinely just touching, not overlapping or still gapped.
+
+**Edge rectangles** (orange): the previous "whichever corner pair happens
+to sit closest together" heuristic didn't reliably pick the RIM-side short
+side of each hub rectangle - at a hub radius wide relative to
+`bandHalfWidth` (reported at `hubRadiusFrac` 0.37), a hub rectangle's two
+short sides differ substantially in distance from that arm's own tip, and
+bridging by mutual proximity could land on the hub-facing side instead.
+`buildHubEdgeRectDebug` now takes each arm's own tip too (`anchorA, tipA,
+anchorB, tipB`), and for each rectangle independently picks whichever
+short side sits closer to THAT arm's own tip, then bridges those two.
+Verified with a standalone script at `hubRadiusFrac` 0.37, `bandHalfWidth`
+0.23 (the reported case): the two candidate corners differ by 0.107 world
+units in distance to the tip (a large, unambiguous gap, confirming the
+asymmetry described), and the fix consistently picks the nearer one; all 5
+of one face's edge rectangles came out with an equal 0.245 bridge length,
+as expected from the pentagon's own 5-fold symmetry.
+
+Both fixes needed the caller (`rebuild()`) updated too: the edge-rectangle
+loop now also looks up each hub anchor's own tip via `tipsByLabel`, and
+the arm-rectangle loop calls the new plural builder once per triple instead
+of once per tip.
+
 ## File layout
 
 ```

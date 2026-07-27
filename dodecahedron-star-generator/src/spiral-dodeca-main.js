@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections, computeThreeCycles } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeHubAnchors, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup, buildHubRingDebug, buildHubRectDebug, buildTristarRectDebug, buildHubEdgeRectDebug, buildTristarArmRectDebug } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeHubAnchors, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup, buildHubRingDebug, buildHubRectDebug, buildTristarRectDebug, buildHubEdgeRectDebug, buildTristarArmRectsDebug } from './spiralarm.js';
 import { createPerforationTexture, createCoralMazeTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -134,7 +134,7 @@ const debugHubRingMaterial = new THREE.LineBasicMaterial({ color: 0x33e6ff, dept
 const debugHubRectMaterial = new THREE.LineBasicMaterial({ color: 0xffe066, depthTest: false, transparent: true, opacity: 0.9 });
 const debugTristarRectMaterial = new THREE.LineBasicMaterial({ color: 0xff4fd8, depthTest: false, transparent: true, opacity: 0.9 });
 // Auxiliary markers (`params.debugAuxRects`) built FROM the 3 above -
-// see buildHubEdgeRectDebug/buildTristarArmRectDebug in spiralarm.js.
+// see buildHubEdgeRectDebug/buildTristarArmRectsDebug in spiralarm.js.
 const debugEdgeRectMaterial = new THREE.LineBasicMaterial({ color: 0xff9933, depthTest: false, transparent: true, opacity: 0.9 });
 const debugArmRectMaterial = new THREE.LineBasicMaterial({ color: 0x9dff5c, depthTest: false, transparent: true, opacity: 0.9 });
 
@@ -256,7 +256,7 @@ const params = {
   // hub-side rectangles (tracing the pentagon hub's boundary between arms),
   // and "tristar arm rectangles" out along each of a shared vertex's 3
   // bars, at the tip end rather than the shared center - see
-  // buildHubEdgeRectDebug/buildTristarArmRectDebug in spiralarm.js.
+  // buildHubEdgeRectDebug/buildTristarArmRectsDebug in spiralarm.js.
   debugAuxRects: false,
   // Cross-section clipping plane.
   clipEnabled: false,
@@ -1112,11 +1112,16 @@ function rebuild() {
       }
       // Edge rectangles: bridge each consecutive PAIR of this face's own
       // hub anchors (arm i to arm (i+1) mod count), tracing the pentagon
-      // hub's boundary between them.
+      // hub's boundary between them. Needs each arm's own TIP (not just
+      // its hub anchor) so buildHubEdgeRectDebug can tell which of a
+      // rectangle's two short sides is actually the near-rim one.
       if (params.debugAuxRects) {
         for (let i = 0; i < hubAnchors.length; i++) {
           const next = hubAnchors[(i + 1) % hubAnchors.length];
-          const edgeGeom = buildHubEdgeRectDebug(hubAnchors[i], next, { R, ...params });
+          const tipI = tipsByLabel.get(`F${face.index}-A${hubAnchors[i].armIndex}`);
+          const tipJ = tipsByLabel.get(`F${face.index}-A${next.armIndex}`);
+          if (!tipI || !tipJ) continue;
+          const edgeGeom = buildHubEdgeRectDebug(hubAnchors[i], tipI, next, tipJ, { R, ...params });
           debugGroup.add(new THREE.LineLoop(edgeGeom, debugEdgeRectMaterial));
         }
       }
@@ -1130,8 +1135,7 @@ function rebuild() {
         boxGeom.dispose();
       }
       if (params.debugAuxRects) {
-        for (const tip of tips) {
-          const boxGeom = buildTristarArmRectDebug(tip, { R, ...params });
+        for (const boxGeom of buildTristarArmRectsDebug(tips[0], tips[1], tips[2], { R, ...params })) {
           debugGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(boxGeom), debugArmRectMaterial));
           boxGeom.dispose();
         }

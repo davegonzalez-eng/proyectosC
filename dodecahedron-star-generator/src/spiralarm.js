@@ -1359,26 +1359,30 @@ export function buildTristarRectDebug(tipA, tipB, tipC, params = {}) {
 
 /**
  * DEBUG "auxiliary" marker 1/2, the "edge rectangles": bridges the
- * rim-facing side of two CONSECUTIVE arms' hub rectangles (see
- * `buildHubRectDebug` - the box face nearest the star's rim, i.e. offset
- * `+tangent * depth/2` from the anchor) into one quad, tracing that
- * stretch of the pentagon hub's own boundary between them.
+ * SHORT side of two CONSECUTIVE arms' hub rectangles (see
+ * `buildHubRectDebug` - a rectangle whose long sides run its full
+ * `bandHalfWidth * 2` width and whose short sides, at its two `major`-axis
+ * extremes, are just `thickness` long) into one quad, tracing that stretch
+ * of the pentagon hub's own boundary between them.
  *
- * Each rectangle's rim-facing side has two candidate corners along its own
- * `major` axis (`+halfW`/`-halfW`) to bridge FROM; which one is actually
- * nearest the other arm depends on `major = tangent x radial`'s sign,
- * which isn't a fixed left/right convention per arm - so this tries all 4
- * combinations of (A's plus/minus corner) x (B's plus/minus corner) and
- * keeps whichever pair sits closest together, rather than assuming one.
+ * Each rectangle has two short sides (`major = +halfW` and `major =
+ * -halfW`) - at a wide `bandHalfWidth` relative to `hubRadiusFrac` (e.g.
+ * hub radius 0.37), one of the two sits noticeably closer to that SAME
+ * arm's own tip (the rim) than the other. Reported: bridging whichever
+ * corners simply happened to sit closest TO EACH OTHER (the previous
+ * approach) didn't consistently pick the rim-side short side, so the
+ * bridge could jump to the hub-facing side instead - this picks each
+ * rectangle's own near-rim short side independently (by distance to that
+ * arm's own tip), then bridges those two.
  * @returns {THREE.BufferGeometry} 4 vertices, meant for `THREE.LineLoop`
  */
-export function buildHubEdgeRectDebug(anchorA, anchorB, params = {}) {
+export function buildHubEdgeRectDebug(anchorA, tipA, anchorB, tipB, params = {}) {
   const { R = 1, bandHalfWidth = 0.22, thickness: armThicknessFrac = 0.015 } = params;
   const halfW = R * bandHalfWidth;
   const halfT = (R * armThicknessFrac) / 2;
   const depth = R * 0.01;
 
-  const frame = (anchor) => {
+  const frame = (anchor, tip) => {
     const tangent = anchor.tipTangent;
     const radial = anchor.tipNormal;
     const major = new THREE.Vector3().crossVectors(tangent, radial);
@@ -1389,33 +1393,28 @@ export function buildHubEdgeRectDebug(anchorA, anchorB, params = {}) {
     major.normalize();
     const minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
     const base = anchor.tipPosition.clone().addScaledVector(tangent, depth / 2);
-    return {
-      minor,
-      plus: base.clone().addScaledVector(major, halfW),
-      minus: base.clone().addScaledVector(major, -halfW),
-    };
+    const plus = base.clone().addScaledVector(major, halfW);
+    const minus = base.clone().addScaledVector(major, -halfW);
+    const nearRim = plus.distanceToSquared(tip.tipPosition) <= minus.distanceToSquared(tip.tipPosition) ? plus : minus;
+    return { minor, nearRim };
   };
-  const A = frame(anchorA);
-  const B = frame(anchorB);
-  const combos = [['plus', 'plus'], ['plus', 'minus'], ['minus', 'plus'], ['minus', 'minus']]
-    .map(([ka, kb]) => ({ a: A[ka], b: B[kb], d: A[ka].distanceTo(B[kb]) }))
-    .sort((x, y) => x.d - y.d);
-  const { a, b } = combos[0];
+  const A = frame(anchorA, tipA);
+  const B = frame(anchorB, tipB);
 
   // `major`/`minor` are computed independently per anchor (no shared
   // "previous frame" to stay continuous with, unlike `computeRibbonFrames`'
   // own sign-flip guard along a single curve) - two different arms' minor
   // axes can easily land pointing opposite ways. Left uncorrected, the quad
   // below crosses itself into a bowtie/X instead of a simple loop; flipping
-  // B's minor to match A's keeps the two edges (`a`'s and `b`'s) winding
-  // the same way around the loop.
+  // B's minor to match A's keeps the two edges (A's and B's) winding the
+  // same way around the loop.
   const minorB = A.minor.dot(B.minor) < 0 ? B.minor.clone().negate() : B.minor;
 
   const corners = [
-    a.clone().addScaledVector(A.minor, halfT),
-    a.clone().addScaledVector(A.minor, -halfT),
-    b.clone().addScaledVector(minorB, -halfT),
-    b.clone().addScaledVector(minorB, halfT),
+    A.nearRim.clone().addScaledVector(A.minor, halfT),
+    A.nearRim.clone().addScaledVector(A.minor, -halfT),
+    B.nearRim.clone().addScaledVector(minorB, -halfT),
+    B.nearRim.clone().addScaledVector(minorB, halfT),
   ];
   const positions = [];
   for (const c of corners) positions.push(c.x, c.y, c.z);
@@ -1428,18 +1427,49 @@ export function buildHubEdgeRectDebug(anchorA, anchorB, params = {}) {
  * DEBUG "auxiliary" marker 2/2, the "tristar arm rectangles": each of a
  * shared vertex's 3 converging bars has a rectangular cross-section out
  * along its own length - not just at the shared center
- * (`buildTristarRectDebug`) - shown here at the bar's OTHER end, where it
- * meets the star arm's own tip, sized to that tip's true half-width/
+ * (`buildTristarRectDebug`) - sized to its tip's true half-width/
  * half-thickness (same formula `buildSpiralVortexRibbonGroup`'s
  * `armHalfWidth`/`armHalfThickness` use for matching a connector's start
- * cross-section to the arm underneath it).
+ * cross-section to the arm underneath it), but positioned not AT the tip -
+ * slid straight toward the shared center, stopping at the point where all
+ * 3 bars' same-size cross-sections would just start touching each other,
+ * rather than the tip itself (reported: markers at the raw tip read too
+ * far from where the three bands actually connect).
+ *
+ * Since each bar's position interpolates straight toward the exact SAME
+ * `center` point, the gap between bar i and bar j's positions scales
+ * exactly as `(1 - t) * (their tip-to-tip distance)` - so the fraction `t`
+ * at which that gap first equals the sum of their (fixed) half-widths has
+ * a closed form, no iteration needed. The largest `t` across all 3 pairs
+ * is used for all 3 markers, so none of the three pairs has already
+ * started overlapping by the time they're drawn.
+ * @returns {THREE.BufferGeometry[]} one box geometry per tip, same order as tipA/tipB/tipC
  */
-export function buildTristarArmRectDebug(tip, params = {}) {
+export function buildTristarArmRectsDebug(tipA, tipB, tipC, params = {}) {
   const { R = 1, bandHalfWidth = 0.22, tipWidthFrac = 0.15, thickness: armThicknessFrac = 0.015 } = params;
-  const width = R * bandHalfWidth * tipWidthFrac * 2;
+  const halfWidth = R * bandHalfWidth * tipWidthFrac;
+  const width = halfWidth * 2;
   const thick = R * armThicknessFrac;
   const depth = R * 0.01;
-  return buildRectMarkerGeometry(tip.tipPosition, tip.tipTangent, tip.tipNormal, width, thick, depth);
+  const center = hornTriangleCenter(tipA, tipB, tipC);
+  const tips = [tipA, tipB, tipC];
+
+  let t = 0;
+  for (let i = 0; i < 3; i++) {
+    const a = tips[i], b = tips[(i + 1) % 3];
+    const d = a.tipPosition.distanceTo(b.tipPosition);
+    if (d < 1e-9) continue;
+    const pairT = 1 - width / d;
+    t = Math.max(t, Math.min(1, Math.max(0, pairT)));
+  }
+
+  return tips.map((tip) => {
+    const position = tip.tipPosition.clone().lerp(center, t);
+    const toCenter = center.clone().sub(tip.tipPosition);
+    const tangent = toCenter.lengthSq() > 1e-12 ? toCenter.normalize() : tip.tipTangent.clone();
+    const radial = position.clone().normalize();
+    return buildRectMarkerGeometry(position, tangent, radial, width, thick, depth);
+  });
 }
 
 function cylinderBetween(start, direction, length, radius, segments = 16) {
