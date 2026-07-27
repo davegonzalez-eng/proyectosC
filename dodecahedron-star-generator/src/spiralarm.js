@@ -1368,12 +1368,14 @@ export function buildTristarRectDebug(tipA, tipB, tipC, params = {}) {
  * Each rectangle has two short sides (`major = +halfW` and `major =
  * -halfW`) - at a wide `bandHalfWidth` relative to `hubRadiusFrac` (e.g.
  * hub radius 0.37), one of the two sits noticeably closer to that SAME
- * arm's own tip (the rim) than the other. Reported: bridging whichever
- * corners simply happened to sit closest TO EACH OTHER (the previous
- * approach) didn't consistently pick the rim-side short side, so the
- * bridge could jump to the hub-facing side instead - this picks each
- * rectangle's own near-rim short side independently (by distance to that
- * arm's own tip), then bridges those two.
+ * arm's own tip (the rim) than the other; bridging the OTHER one (the
+ * far-from-rim side, per request) is what actually traces the pentagon
+ * hub's own boundary between two consecutive arms - the near-rim side
+ * instead follows each arm's own outline out toward its tip. Reported:
+ * bridging whichever corners simply happened to sit closest TO EACH OTHER
+ * (an earlier approach) didn't consistently pick the same side either -
+ * this picks each rectangle's own far-from-rim short side independently
+ * (by distance to that arm's own tip), then bridges those two.
  * @returns {THREE.BufferGeometry} 4 vertices, meant for `THREE.LineLoop`
  */
 export function buildHubEdgeRectDebug(anchorA, tipA, anchorB, tipB, params = {}) {
@@ -1395,8 +1397,8 @@ export function buildHubEdgeRectDebug(anchorA, tipA, anchorB, tipB, params = {})
     const base = anchor.tipPosition.clone().addScaledVector(tangent, depth / 2);
     const plus = base.clone().addScaledVector(major, halfW);
     const minus = base.clone().addScaledVector(major, -halfW);
-    const nearRim = plus.distanceToSquared(tip.tipPosition) <= minus.distanceToSquared(tip.tipPosition) ? plus : minus;
-    return { minor, nearRim };
+    const farSide = plus.distanceToSquared(tip.tipPosition) >= minus.distanceToSquared(tip.tipPosition) ? plus : minus;
+    return { minor, farSide };
   };
   const A = frame(anchorA, tipA);
   const B = frame(anchorB, tipB);
@@ -1411,10 +1413,10 @@ export function buildHubEdgeRectDebug(anchorA, tipA, anchorB, tipB, params = {})
   const minorB = A.minor.dot(B.minor) < 0 ? B.minor.clone().negate() : B.minor;
 
   const corners = [
-    A.nearRim.clone().addScaledVector(A.minor, halfT),
-    A.nearRim.clone().addScaledVector(A.minor, -halfT),
-    B.nearRim.clone().addScaledVector(minorB, -halfT),
-    B.nearRim.clone().addScaledVector(minorB, halfT),
+    A.farSide.clone().addScaledVector(A.minor, halfT),
+    A.farSide.clone().addScaledVector(A.minor, -halfT),
+    B.farSide.clone().addScaledVector(minorB, -halfT),
+    B.farSide.clone().addScaledVector(minorB, halfT),
   ];
   const positions = [];
   for (const c of corners) positions.push(c.x, c.y, c.z);

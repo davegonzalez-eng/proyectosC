@@ -2521,6 +2521,20 @@ loop now also looks up each hub anchor's own tip via `tipsByLabel`, and
 the arm-rectangle loop calls the new plural builder once per triple instead
 of once per tip.
 
+## 44. Edge rectangles: bridge the OTHER short side per follow-up feedback
+
+§43 picked each hub rectangle's near-rim short side (closer to that arm's
+own tip) to bridge between consecutive arms; follow-up feedback was that
+the far side - the one NOT near the rim - is the one that should be
+bridged instead. One-line fix: `buildHubEdgeRectDebug`'s per-rectangle
+selection flipped from `<=` to `>=` when comparing the two candidate
+corners' distance to the arm's own tip (`nearRim` renamed `farSide` to
+match). Re-verified: still 0 bowties across all 60 edge rectangles at
+`hubRadiusFrac` 0.37 (the winding-consistency fix from §43 doesn't depend
+on which side is picked, only that both rectangles in a pair pick
+consistently-wound corners), and zero console errors in headless Chromium
+with both debug toggles on.
+
 ## File layout
 
 ```
