@@ -981,42 +981,6 @@ export function computeArmTips(star2D, face, params = {}) {
 }
 
 /**
- * The hub-side counterpart to `computeArmTips`: same shape
- * ({tipPosition, tipTangent, tipNormal, armIndex}), but anchored at the
- * FAR end of each arm's centerline (`armPolylines2D`'s last sample, right
- * at the hub near the face center) instead of the near-rim tip. Returning
- * the identical shape means this can be fed straight into
- * `spiralVortexPointAt`/`computeRibbonFrames` exactly like a real tip -
- * both only ever read `tipPosition`/`tipTangent`/`tipNormal` off whatever
- * object they're given (see `buildMoebiusConnectorGroup`, the one caller
- * that actually anchors a connector here instead of at a tip).
- * `tipTangent` points OUTWARD from the hub (toward that arm's own tip),
- * matching `computeArmTips`' own "tangent points away from the center"
- * convention at the opposite end.
- * @returns {{armIndex: number, tipPosition: THREE.Vector3, tipTangent: THREE.Vector3, tipNormal: THREE.Vector3}[]}
- */
-export function computeHubAnchors(star2D, face, params = {}) {
-  const R = star2D.R;
-  const place = (u, w) => mapStarPoint(u, w, R, face, params);
-  const eps = R * 1e-3;
-  return star2D.armPolylines2D.map((pts, armIndex) => {
-    const n = pts.length;
-    const hub2D = pts[n - 1];
-    const prev2D = pts[n - 2];
-    const p0 = place(hub2D.x, hub2D.y);
-    const p1 = place(prev2D.x, prev2D.y);
-    const tangent = p1.clone().sub(p0).normalize();
-    const pu = place(hub2D.x + eps, hub2D.y).sub(place(hub2D.x - eps, hub2D.y));
-    const pw = place(hub2D.x, hub2D.y + eps).sub(place(hub2D.x, hub2D.y - eps));
-    const tipNormal = new THREE.Vector3().crossVectors(pu, pw);
-    if (tipNormal.lengthSq() < 1e-16) tipNormal.copy(p0).normalize();
-    else tipNormal.normalize();
-    if (tipNormal.dot(face.normal) < 0) tipNormal.negate();
-    return { armIndex, tipPosition: p0, tipTangent: tangent, tipNormal };
-  });
-}
-
-/**
  * A raised bead tracing every boundary loop of the solid star (outer
  * silhouette AND every gap/hole edge) - the smooth-shaded field-based sheet
  * on its own reads as a flat cutout; a defined rim/bezel along every edge
@@ -1562,21 +1526,6 @@ function computeRibbonFrames(tip, center, options = {}) {
     thickness = 0.012,
     armHalfWidth = 0,
     armHalfThickness = 0,
-    // Extra rotation of the cross-section's (major, minor) frame about its
-    // own tangent, ramped smoothstep from 0 at t=0 to `halfTwists * 180deg`
-    // at t=1 - the actual "Mobius" half-twist `buildMoebiusConnectorGroup`
-    // asks for, layered ON TOP of the frame's existing radial-blend
-    // rotation rather than replacing it. 0 (the default) leaves every other
-    // caller's frame construction untouched.
-    halfTwists = 0,
-    // Constant offset along the frame's own `minor` axis, applied to every
-    // station's `p` before the cross-section is built from it - lifts a
-    // connector clear of whatever surface its curve happens to coincide
-    // with (see `buildMoebiusConnectorGroup`, which runs the same width/
-    // thickness as the star's own arm right at t=0 and would otherwise
-    // z-fight the untouched arm sheet still rendered underneath it). 0 (the
-    // default) leaves every other caller's frame position untouched.
-    surfaceLift = 0,
   } = options;
   const pointAt = spiralVortexPointAt(tip, center, options);
   const endWidth = startWidth * endWidthFrac;
@@ -1628,23 +1577,7 @@ function computeRibbonFrames(tip, center, options = {}) {
       ? THREE.MathUtils.lerp(armHalfThickness, halfThickTarget, blendT)
       : halfThickTarget;
 
-    // Same smoothstep envelope the width taper uses, so the twist reaches
-    // its full amount exactly at t=1 (the center) with zero rate at t=0
-    // (the anchor) - a flat start, matching whatever flat surface the
-    // connector departs from, same reasoning as the swirl envelope in
-    // `spiralVortexPointAt`.
-    if (halfTwists) {
-      const twistAngle = halfTwists * Math.PI * widthT;
-      const cosA = Math.cos(twistAngle), sinA = Math.sin(twistAngle);
-      const rotMajor = major.clone().multiplyScalar(cosA).addScaledVector(minor, sinA);
-      const rotMinor = minor.clone().multiplyScalar(cosA).addScaledVector(major, -sinA);
-      major.copy(rotMajor);
-      minor.copy(rotMinor);
-    }
-
-    const framePoint = surfaceLift ? p.clone().addScaledVector(minor, surfaceLift) : p;
-
-    frames.push({ t, p: framePoint, tangent, major, minor, halfW, halfThick, arcLen });
+    frames.push({ t, p, tangent, major, minor, halfW, halfThick, arcLen });
   }
   return frames;
 }
@@ -1823,11 +1756,8 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
       lengthMultiplier: spiralLengthMultiplier,
       startWidth,
       thickness,
-      // halfTwists intentionally omitted (defaults to 0): this style's own
-      // "twist" is entirely the frame's natural rotation as its radial
-      // reference blends from the tip's surface normal to a sphere-radial
-      // approximation (see computeRibbonFrames) - not user-adjustable here.
-      // `buildMoebiusConnectorGroup` below is the one caller that sets it.
+      // halfTwists intentionally omitted - always the function's own fixed
+      // quarter-turn (see buildSpiralVortexRibbonArm), not user-adjustable.
     };
     const geom = buildSpiralVortexRibbonArm(tip, center, shared);
     group.add(new THREE.Mesh(geom));
@@ -1835,98 +1765,6 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
     // the star sheet's own rim treatment (buildStarRim) for visual
     // consistency between the two surfaces meeting at the connection.
     const rimGeom = buildSpiralVortexRibbonRim(tip, center, {
-      ...shared,
-      rimWidthFrac: ribbonRimWidthFrac,
-      rimProud: R * ribbonRimProudFrac,
-    });
-    group.add(new THREE.Mesh(rimGeom));
-  }
-  return group;
-}
-
-/**
- * "Moebius Connect": one continuous band per tip, from that arm's own
- * HUB-side rectangle (the pentagon hub's own full width/thickness - where
- * `buildSolidStar2D`'s arms reach their widest, at `bandHalfWidth * 2` -
- * `computeHubAnchors` anchors it there) all the way out to the shared
- * vertex's Mercedes-tristar rectangle (the same converged width/thickness
- * `buildSpiralVortexRibbonGroup`'s own ribbons reach), carrying a
- * Mobius-style half-twist along its length instead of arriving flat.
- *
- * Reuses `buildSpiralVortexRibbonArm`/`Rim` verbatim - both only ever read
- * `tipPosition`/`tipTangent`/`tipNormal` off whatever "tip" they're given
- * (`computeHubAnchors`' return shape matches `computeArmTips`' exactly for
- * this reason), and `computeRibbonFrames`'s existing armHalfWidth/
- * armHalfThickness blend already handles matching a wide start
- * cross-section into a taper - only the anchor, the target end size, and
- * the twist amount differ from the plain ribbon connector above.
- *
- * The star's own arm sheet is left rendering underneath this band for its
- * whole length (unlike `spiralRibbon`, which trims the arm back near the
- * tip) - trimming a whole arm away safely would need per-arm boundary
- * re-triangulation this module doesn't have (a single cut plane, unlike
- * the tip-region trim, can't isolate one arm's whole span from its
- * neighbors this close to where all 5 converge). `surfaceLift` instead
- * lifts the band clear of that sheet by a small constant amount so the two
- * don't z-fight, at the cost of the arm's own surface still being visible
- * as a thin sliver along the band's untwisted (t near 0) edges.
- * @returns {THREE.Group}
- */
-export function buildMoebiusConnectorGroup(hubAnchorA, hubAnchorB, hubAnchorC, tipA, tipB, tipC, params = {}) {
-  const {
-    R = 1,
-    spiralSweepFrac = 0.12,
-    spiralLaunchFrac = 0,
-    spiralLengthMultiplier = 1,
-    spiralRibbonWidthFrac = 0.09,
-    spiralRibbonThicknessFrac = 0.012,
-    thickness: armThicknessFrac = 0.015,
-    bandHalfWidth = 0.22,
-    // In half-twists (each = 180 degrees) - 1 is the textbook single
-    // Mobius-strip half-twist between the two ends; the user-facing default
-    // this preset ships with.
-    moebiusHalfTwists = 1,
-    moebiusTurns = 0.12,
-    ribbonRimWidthFrac = 0.22,
-    ribbonRimProudFrac = 0.006,
-  } = params;
-  const center = hornTriangleCenter(tipA, tipB, tipC);
-  const group = new THREE.Group();
-
-  // Hub-side start: the pentagon hub's own full width/thickness, matched
-  // via `armHalfWidth`/`armHalfThickness` exactly like the plain ribbon
-  // connector matches the arm's TIP instead.
-  const hubHalfWidth = R * bandHalfWidth;
-  const hubHalfThickness = (R * armThicknessFrac) / 2;
-  const startWidth = hubHalfWidth * 2;
-  // Target end size matches what the plain tip-anchored ribbon converges to
-  // at the same shared vertex (its own fixed 1.4x flare over its own
-  // `spiralRibbonWidthFrac` start, see computeRibbonFrames' endWidthFrac
-  // default) - so a Moebius band and a plain ribbon reaching the same
-  // vertex fuse into a consistently-sized hub either way.
-  const targetEndWidth = R * spiralRibbonWidthFrac * 1.4;
-  const endWidthFrac = targetEndWidth / startWidth;
-  const thickness = R * spiralRibbonThicknessFrac;
-  const surfaceLift = R * 0.006;
-
-  const hubAnchors = [hubAnchorA, hubAnchorB, hubAnchorC];
-  for (const anchor of hubAnchors) {
-    const shared = {
-      armHalfWidth: hubHalfWidth,
-      armHalfThickness: hubHalfThickness,
-      turns: moebiusTurns,
-      sweepFrac: spiralSweepFrac,
-      launchFrac: spiralLaunchFrac,
-      lengthMultiplier: spiralLengthMultiplier,
-      startWidth,
-      endWidthFrac,
-      thickness,
-      halfTwists: moebiusHalfTwists,
-      surfaceLift,
-    };
-    const geom = buildSpiralVortexRibbonArm(anchor, center, shared);
-    group.add(new THREE.Mesh(geom));
-    const rimGeom = buildSpiralVortexRibbonRim(anchor, center, {
       ...shared,
       rimWidthFrac: ribbonRimWidthFrac,
       rimProud: R * ribbonRimProudFrac,
