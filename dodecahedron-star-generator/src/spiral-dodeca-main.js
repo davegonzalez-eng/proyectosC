@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections, computeThreeCycles } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeHubAnchors, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup, buildHubRingDebug, buildHubRectDebug, buildTristarRectDebug, buildHubEdgeRectDebug, buildTristarArmRectsDebug } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeHubAnchors, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup, buildHubRingDebug, buildHubRectDebug, buildTristarRectDebug, buildHubEdgeRectDebug, buildTristarArmRectsDebug, buildRectangleConnectorGroup } from './spiralarm.js';
 import { createPerforationTexture, createCoralMazeTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -336,6 +336,25 @@ const params = {
   // against it) is fixed in `buildSpiralVortexRibbonArm`, not a param here.
   spiralRibbonWidthFrac: 0.09,
   spiralRibbonThicknessFrac: 0.012,
+  // "Rectangle Connect": no star arms at all - just a Mobius-twisted
+  // ribbon per arm, from its own "orange" hub-edge point out to its own
+  // "lime" tristar touching-point (see buildRectangleConnectorGroup in
+  // spiralarm.js, and the debug markers of the same colors those names
+  // refer to). In half-twists (180deg each); 1 is the textbook single
+  // Mobius half-twist.
+  moebiusHalfTwists: 1,
+  moebiusTurns: 0.06,
+  // Shared by both the debug "touching point" markers and any connector
+  // that trims/anchors to that same point (spiralRibbon's tMin,
+  // rectangleConnect's lime anchor) - see buildTristarArmRectsDebug's own
+  // doc for why this is 2 independent fractions rather than 1 shared value
+  // with renderWidthFrac.
+  touchWidthFrac: 1 / 3,
+  renderWidthFrac: 0.5,
+  // Debug/Rectangle-Connect-only: skip building the star sheet + rim
+  // entirely for every face - "instead of drawing the star arms" a
+  // preset can ask for just the connector geometry on its own.
+  hideStarArms: false,
 };
 
 // Three named parameter bundles, applied wholesale via setParams() from the
@@ -459,7 +478,11 @@ const PRESETS = {
   // the sphere's radial line at the shared vertex center, instead of lying
   // flat against it.
   odysseyThickBands: {
-    starRotationDeg: 14, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.14,
+    starRotationDeg: 14, tipScale: 1.14, turns: 0.1,
+    // Hub radius bumped 0.14->0.39 per request (matches the value the
+    // "connection rectangle" debug markers were tuned/confirmed against -
+    // see §43-45).
+    hubRadiusFrac: 0.39,
     bandHalfWidth: 0.305, tipWidthFrac: 0.57, widthTaperPower: 0.9,
     thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
     tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
@@ -468,14 +491,14 @@ const PRESETS = {
     fieldGrid: 144,
     singleFaceMode: false, connectorStyle: 'spiralRibbon', snapEnabled: false,
     spiralTurns: 0.1, spiralSweepFrac: 0.02, spiralLaunchFrac: 0,
-    // Now that the ribbon's frame uses the arm's own true surface normal
-    // near the tip (see buildSpiralVortexRibbonArm), meeting exactly at
-    // the true tip (launchFrac: 0) reads clean rather than needing an
-    // inset to hide a normal mismatch - `lengthMultiplier` instead extends
-    // the connector 1.5x past the true tip-to-center span, backward into
-    // the arm, per request ("go further within the star arm... fuse more
-    // aggressively in a co-planar way").
-    spiralLengthMultiplier: 1.5,
+    // Back to 1 (was 1.5, extending the connector backward into the arm) -
+    // the connector is now trimmed to only draw center-to-touch-point (see
+    // buildSpiralVortexRibbonGroup's tMin), so it no longer needs to reach
+    // backward into the arm at all; 1.5 here would also still trigger
+    // rebuild()'s old arm-surface trim (armTrimsByFace, gated on this
+    // going negative), which doesn't apply now that the ribbon and the arm
+    // no longer overlap.
+    spiralLengthMultiplier: 1,
     // Thickness cut to a third of its previous value (0.09->0.03) - at
     // 0.135 width it was reading nearly square, which combined with the
     // ribbon's open ends (see buildSpiralVortexRibbonArm's end cap) looked
@@ -486,6 +509,27 @@ const PRESETS = {
     // this number no longer needs to reach the arm's own ~0.348 for the
     // two surfaces to meet cleanly.
     spiralRibbonWidthFrac: 0.11, spiralRibbonThicknessFrac: 0.03,
+    material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
+    lampMode: false, lampIntensity: 19,
+  },
+  // Same star shape as `odysseyThickBands` (needed for the underlying arm
+  // math - hub anchors, tips, tristar touching-points - even though none
+  // of it gets rendered) - `hideStarArms: true` skips the star sheet/rim
+  // entirely, and `connectorStyle: 'rectangleConnect'` replaces it with a
+  // Mobius-twisted ribbon per arm bridging that arm's own hub-edge point
+  // to its own tristar touching-point (see buildRectangleConnectorGroup).
+  rectangleConnect: {
+    starRotationDeg: 14, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.39,
+    bandHalfWidth: 0.305, tipWidthFrac: 0.57, widthTaperPower: 0.9,
+    thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
+    tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
+    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
+    showExtensions: true, showRim: false,
+    fieldGrid: 144,
+    singleFaceMode: false, connectorStyle: 'rectangleConnect', snapEnabled: false,
+    hideStarArms: true,
+    moebiusHalfTwists: 1, moebiusTurns: 0.06, spiralSweepFrac: 0.04,
+    renderWidthFrac: 0.5, touchWidthFrac: 1 / 3,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: false, lampIntensity: 19,
   },
@@ -947,6 +991,20 @@ function rebuild() {
     }
   }
 
+  // Same idea, at the opposite (hub) end of each arm - only "Rectangle
+  // Connect" actually connects anything to these; the debug overlay's own
+  // per-face loop computes hub anchors fresh instead (it doesn't need
+  // them addressable by label).
+  /** @type {Map<string, {tipPosition: THREE.Vector3, tipTangent: THREE.Vector3, tipNormal: THREE.Vector3}>} */
+  const hubAnchorsByLabel = new Map();
+  if (params.connectorStyle === 'rectangleConnect') {
+    for (const face of faces) {
+      for (const anchor of computeHubAnchors(star2D, face, params)) {
+        hubAnchorsByLabel.set(`F${face.index}-A${anchor.armIndex}`, anchor);
+      }
+    }
+  }
+
   // Star Odyssey - Thick Bands: work out, for every arm tip, how far back
   // into the arm the `spiralRibbon` connector now reaches (mirroring
   // `spiralVortexPointAt`'s own `offsetFrac` math exactly) - if it reaches
@@ -996,7 +1054,7 @@ function rebuild() {
 
   for (const face of faces) {
     const isShown = !params.singleFaceMode || face.index === params.singleFaceIndex;
-    if (isShown) {
+    if (isShown && !params.hideStarArms) {
       const armTrims = armTrimsByFace.get(face.index) || null;
       const { geometry } = mapSolidStarToFace(star2D, face, params, armTrims);
       const starMesh = new THREE.Mesh(geometry, sculptureMaterial);
@@ -1093,6 +1151,21 @@ function rebuild() {
         // bare, unlit strip stitched onto the star's own dotted texture.
         ribbonGroup.children.forEach((m) => { m.material = sculptureMaterial; });
         extGroup.add(ribbonGroup);
+        connectorCount++;
+      }
+    } else if (params.connectorStyle === 'rectangleConnect') {
+      // Rectangle Connect: no star arms at all (see hideStarArms above) -
+      // just a Mobius-twisted ribbon per arm, from that arm's own hub-edge
+      // point to its own tristar touching-point.
+      for (const triple of threeCycles) {
+        const tips = triple.map((label) => tipsByLabel.get(label));
+        const hubAnchors = triple.map((label) => hubAnchorsByLabel.get(label));
+        if (tips.some((t) => !t) || hubAnchors.some((h) => !h)) { missing++; continue; }
+        const rectGroup = buildRectangleConnectorGroup(
+          tips[0], tips[1], tips[2], hubAnchors[0], hubAnchors[1], hubAnchors[2], { R, ...params }
+        );
+        rectGroup.children.forEach((m) => { m.material = sculptureMaterial; });
+        extGroup.add(rectGroup);
         connectorCount++;
       }
     }
@@ -1207,6 +1280,18 @@ bindSlider('spiralLengthMultiplier', 'spiralLengthMultiplier');
 bindSlider('spiralArcWidthFrac', 'spiralArcWidthFrac');
 bindSlider('spiralRibbonWidthFrac', 'spiralRibbonWidthFrac');
 bindSlider('spiralRibbonThicknessFrac', 'spiralRibbonThicknessFrac');
+bindSlider('moebiusHalfTwists', 'moebiusHalfTwists');
+bindSlider('moebiusTurns', 'moebiusTurns');
+// Its own listener (not the shared bindSlider helper) - this slider writes
+// to the SAME `spiralSweepFrac` param the spiralVortex/spiralRibbon
+// styles' own slider does (so all 3 spiral-based connector styles share
+// one underlying param), but needs a differently-ID'd label element to
+// avoid colliding with that other slider's own `v-spiralSweepFrac` id.
+document.getElementById('rectSweepFrac').addEventListener('input', (e) => {
+  params.spiralSweepFrac = parseFloat(e.target.value);
+  document.getElementById('v-rectSweepFrac').textContent = params.spiralSweepFrac;
+  rebuild();
+});
 bindSlider('rimWidthFrac', 'rimWidthFrac');
 bindSlider('rimProudFrac', 'rimProudFrac');
 bindSlider('holeSize', 'holeSize', { appearanceOnly: true });
@@ -1282,6 +1367,7 @@ const PRESET_HINTS = {
   starOdyssey: "Same stars as #1, but every horn-triangle arc is replaced by a 3-way spiral funnel converging at that vertex's center.",
   odysseyThicker: 'Star Odyssey with wider, chunkier tips and a smaller hub - a second live-tuned variant.',
   odysseyThickBands: 'Star Odyssey with the spiral connectors as flat, wide ribbons instead of tapered tubes, flush with the sphere and flaring out into one broad fused hub - Mercedes tristar style - at the shared vertex center where the three bands meet.',
+  rectangleConnect: "No star arms at all - just a Mobius-twisted ribbon per arm, bridging that arm's own hub-edge point to its own tristar touching-point (the same two points the 'connection'/'auxiliary' debug rectangles mark).",
 };
 // Each connector style has its own shape sliders (the horn arc's
 // length/depth/clothoid params mean nothing to the spiral vortex, and vice
@@ -1297,6 +1383,7 @@ function updateConnectorControlsVisibility() {
   document.getElementById('spiralCurveControls').style.display = isSpiral ? 'block' : 'none';
   document.getElementById('spiralVortexTubeControls').style.display = params.connectorStyle === 'spiralVortex' ? 'block' : 'none';
   document.getElementById('spiralRibbonControls').style.display = params.connectorStyle === 'spiralRibbon' ? 'block' : 'none';
+  document.getElementById('rectangleConnectControls').style.display = params.connectorStyle === 'rectangleConnect' ? 'block' : 'none';
 }
 document.getElementById('preset').addEventListener('change', (e) => {
   const name = e.target.value;
@@ -1379,6 +1466,15 @@ function syncControl(key) {
   if (el && el.type === 'checkbox') el.checked = params[key];
   if (el && el.tagName === 'SELECT') el.value = params[key];
   if (label) label.textContent = params[key];
+  // `rectSweepFrac` mirrors this same param under a different element id
+  // (see its own listener below) so it can show its own label without
+  // colliding with `spiralSweepFrac`'s - keep it in sync too.
+  if (key === 'spiralSweepFrac') {
+    const mirrorEl = document.getElementById('rectSweepFrac');
+    const mirrorLabel = document.getElementById('v-rectSweepFrac');
+    if (mirrorEl) mirrorEl.value = params[key];
+    if (mirrorLabel) mirrorLabel.textContent = params[key];
+  }
 }
 for (const key of Object.keys(params)) syncControl(key);
 

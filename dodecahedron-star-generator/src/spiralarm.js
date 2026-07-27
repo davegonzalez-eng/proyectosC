@@ -1782,6 +1782,26 @@ function computeRibbonFrames(tip, center, options = {}) {
     thickness = 0.012,
     armHalfWidth = 0,
     armHalfThickness = 0,
+    // Extra rotation of the cross-section's (major, minor) frame about its
+    // own tangent, ramped smoothstep from 0 at t=0 to `halfTwists * 180deg`
+    // at t=1 - a real Mobius-style half-twist, layered ON TOP of the
+    // frame's existing radial-blend rotation rather than replacing it. 0
+    // (the default) leaves every other caller's frame construction
+    // untouched.
+    halfTwists = 0,
+    // Constant offset along the frame's own `minor` axis, applied to every
+    // station's `p` before the cross-section is built from it - lifts a
+    // connector clear of whatever surface its curve happens to coincide
+    // with. 0 (the default) leaves every other caller's frame position
+    // untouched.
+    surfaceLift = 0,
+    // Only sample the curve's own [tMin, 1] stretch (still evaluating the
+    // TRUE t at every station, not a rescaled [0,1]) - so the rendered
+    // ribbon starts partway along the curve instead of at its true t=0,
+    // with its width/twist/thickness at that new start exactly matching
+    // what the full, untrimmed curve would have shown there. 0 (the
+    // default) leaves every other caller's frames the same as before.
+    tMin = 0,
   } = options;
   const pointAt = spiralVortexPointAt(tip, center, options);
   const endWidth = startWidth * endWidthFrac;
@@ -1792,7 +1812,7 @@ function computeRibbonFrames(tip, center, options = {}) {
   let arcLen = 0;
   let prevP = null;
   for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
+    const t = tMin + (1 - tMin) * (i / segments);
     const p = pointAt(t);
     if (prevP) arcLen += p.distanceTo(prevP);
     prevP = p.clone();
@@ -1833,7 +1853,23 @@ function computeRibbonFrames(tip, center, options = {}) {
       ? THREE.MathUtils.lerp(armHalfThickness, halfThickTarget, blendT)
       : halfThickTarget;
 
-    frames.push({ t, p, tangent, major, minor, halfW, halfThick, arcLen });
+    // Same smoothstep envelope the width taper uses, so the twist reaches
+    // its full amount exactly at t=1 (the center) with zero rate at t=0
+    // (the anchor) - a flat start, matching whatever flat surface the
+    // connector departs from, same reasoning as the swirl envelope in
+    // `spiralVortexPointAt`.
+    if (halfTwists) {
+      const twistAngle = halfTwists * Math.PI * widthT;
+      const cosA = Math.cos(twistAngle), sinA = Math.sin(twistAngle);
+      const rotMajor = major.clone().multiplyScalar(cosA).addScaledVector(minor, sinA);
+      const rotMinor = minor.clone().multiplyScalar(cosA).addScaledVector(major, -sinA);
+      major.copy(rotMajor);
+      minor.copy(rotMinor);
+    }
+
+    const framePoint = surfaceLift ? p.clone().addScaledVector(minor, surfaceLift) : p;
+
+    frames.push({ t, p: framePoint, tangent, major, minor, halfW, halfThick, arcLen });
   }
   return frames;
 }
@@ -2002,6 +2038,26 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
   const thickness = R * spiralRibbonThicknessFrac;
   const armHalfWidth = R * bandHalfWidth * tipWidthFrac;
   const armHalfThickness = (R * armThicknessFrac) / 2;
+
+  // Only draw from the shared center out to where the "tristar arm"
+  // debug marker sits (see buildTristarArmRectsDebug - same touching-width
+  // formula and per-pair max, so the trimmed ribbon's own visible start
+  // lands at the same point that marker does), rather than continuing all
+  // the way out to the tip. Straight-line distance between the tips
+  // stands in for the curve's own (close to straight, for the small
+  // turns/sweepFrac this connector style uses) arc length.
+  const touchWidthFrac = params.touchWidthFrac ?? 1 / 3;
+  const touchWidth = armHalfWidth * 2 * touchWidthFrac;
+  const tips3 = [tipA, tipB, tipC];
+  let tMin = 0;
+  for (let i = 0; i < 3; i++) {
+    const a = tips3[i], b = tips3[(i + 1) % 3];
+    const d = a.tipPosition.distanceTo(b.tipPosition);
+    if (d < 1e-9) continue;
+    const pairT = 1 - touchWidth / d;
+    tMin = Math.max(tMin, Math.min(1, Math.max(0, pairT)));
+  }
+
   for (const tip of [tipA, tipB, tipC]) {
     const shared = {
       armHalfWidth,
@@ -2012,6 +2068,7 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
       lengthMultiplier: spiralLengthMultiplier,
       startWidth,
       thickness,
+      tMin,
       // halfTwists intentionally omitted - always the function's own fixed
       // quarter-turn (see buildSpiralVortexRibbonArm), not user-adjustable.
     };
@@ -2021,6 +2078,101 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
     // the star sheet's own rim treatment (buildStarRim) for visual
     // consistency between the two surfaces meeting at the connection.
     const rimGeom = buildSpiralVortexRibbonRim(tip, center, {
+      ...shared,
+      rimWidthFrac: ribbonRimWidthFrac,
+      rimProud: R * ribbonRimProudFrac,
+    });
+    group.add(new THREE.Mesh(rimGeom));
+  }
+  return group;
+}
+
+/**
+ * "Rectangle Connect": replaces the star arm entirely with a Mobius-
+ * twisted ribbon per arm, running from that arm's own "orange" hub-edge
+ * point (see `buildHubEdgeRectDebug` - the far-from-rim short side of its
+ * own hub rectangle, the SAME corner that rectangle's own edge-bridge
+ * uses) out to that arm's own "lime" tristar touching-point (see
+ * `buildTristarArmRectsDebug` - where all 3 bars at the shared vertex
+ * would just start touching). No star sheet is drawn at all in this
+ * style (`rebuild()` gates the whole star mesh/rim behind
+ * `params.hideStarArms`) - these ribbons ARE the visible geometry.
+ *
+ * Reuses the same curve/frame machinery every other spiral-vortex
+ * connector does (`spiralVortexPointAt`/`computeRibbonFrames`, including
+ * the `halfTwists` option `buildTristarArmRectsDebug`'s "Moebius Connect"
+ * precursor introduced) - only the two anchors and the taper between them
+ * differ: `startWidth`/`thickness` at the hub end match the orange point's
+ * own short-side extent (so there's no gap where the ribbon starts),
+ * `endWidthFrac` grows it out to match the lime marker's own render width
+ * at the far end.
+ * @returns {THREE.Group}
+ */
+export function buildRectangleConnectorGroup(tipA, tipB, tipC, hubAnchorA, hubAnchorB, hubAnchorC, params = {}) {
+  const {
+    R = 1,
+    bandHalfWidth = 0.22,
+    tipWidthFrac = 0.15,
+    thickness: armThicknessFrac = 0.015,
+    renderWidthFrac = 0.5,
+    touchWidthFrac = 1 / 3,
+    moebiusHalfTwists = 1,
+    moebiusTurns = 0.06,
+    spiralSweepFrac = 0.04,
+    ribbonRimWidthFrac = 0.22,
+    ribbonRimProudFrac = 0.006,
+  } = params;
+  const center = hornTriangleCenter(tipA, tipB, tipC);
+  const trueWidth = R * bandHalfWidth * tipWidthFrac * 2;
+  const renderWidth = trueWidth * renderWidthFrac;
+  const touchWidth = trueWidth * touchWidthFrac;
+  const thick = R * armThicknessFrac;
+  const halfW = R * bandHalfWidth;
+
+  const tips = [tipA, tipB, tipC];
+  const hubAnchors = [hubAnchorA, hubAnchorB, hubAnchorC];
+
+  let t = 0;
+  for (let i = 0; i < 3; i++) {
+    const a = tips[i], b = tips[(i + 1) % 3];
+    const d = a.tipPosition.distanceTo(b.tipPosition);
+    if (d < 1e-9) continue;
+    const pairT = 1 - touchWidth / d;
+    t = Math.max(t, Math.min(1, Math.max(0, pairT)));
+  }
+
+  const group = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const tip = tips[i];
+    const hubAnchor = hubAnchors[i];
+    const limePosition = tip.tipPosition.clone().lerp(center, t);
+
+    // The "orange" hub-edge point: same far-from-rim short side
+    // `buildHubEdgeRectDebug` bridges from this exact arm.
+    const majorDir = new THREE.Vector3().crossVectors(hubAnchor.tipTangent, hubAnchor.tipNormal);
+    if (majorDir.lengthSq() < 1e-10) {
+      majorDir.set(Math.abs(hubAnchor.tipTangent.x) < 0.9 ? 1 : 0, Math.abs(hubAnchor.tipTangent.x) < 0.9 ? 0 : 1, 0);
+      majorDir.addScaledVector(hubAnchor.tipTangent, -majorDir.dot(hubAnchor.tipTangent));
+    }
+    majorDir.normalize();
+    const plus = hubAnchor.tipPosition.clone().addScaledVector(majorDir, halfW);
+    const minus = hubAnchor.tipPosition.clone().addScaledVector(majorDir, -halfW);
+    const farSide = plus.distanceToSquared(tip.tipPosition) >= minus.distanceToSquared(tip.tipPosition) ? plus : minus;
+    const hubEndAnchor = { tipPosition: farSide, tipTangent: hubAnchor.tipTangent.clone(), tipNormal: hubAnchor.tipNormal.clone() };
+
+    const shared = {
+      turns: moebiusTurns,
+      sweepFrac: spiralSweepFrac,
+      launchFrac: 0,
+      lengthMultiplier: 1,
+      startWidth: thick,
+      endWidthFrac: renderWidth / thick,
+      thickness: thick,
+      halfTwists: moebiusHalfTwists,
+    };
+    const geom = buildSpiralVortexRibbonArm(hubEndAnchor, limePosition, shared);
+    group.add(new THREE.Mesh(geom));
+    const rimGeom = buildSpiralVortexRibbonRim(hubEndAnchor, limePosition, {
       ...shared,
       rimWidthFrac: ribbonRimWidthFrac,
       rimProud: R * ribbonRimProudFrac,

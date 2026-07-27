@@ -2566,6 +2566,73 @@ markers now render as small, tight clusters right at each of the 20
 shared-vertex convergence points instead of spread further out along the
 bars.
 
+## 46. Odyssey Thick Bands: hub radius 0.39 + connector trimmed to the touch point; new "Rectangle Connect" preset
+
+Three requests in one round, all building on the debug markers from
+§41-45.
+
+**odysseyThickBands defaults**: `hubRadiusFrac` 0.14 -> 0.39 (the value the
+debug markers were tuned/confirmed against). The spiralRibbon connector
+itself is now trimmed to only draw from the shared center back to where
+the "tristar arm" (lime) marker sits, instead of continuing all the way to
+the tip - `computeRibbonFrames` gained a `tMin` option (0 default, so
+every other caller is untouched) that samples the curve's own `[tMin, 1]`
+stretch while still evaluating the TRUE `t` at each station (so
+width/twist/thickness at the new start exactly match what the untrimmed
+curve would have shown there - nothing about the curve's shape changes,
+only how much of it gets frames built). `buildSpiralVortexRibbonGroup`
+computes `tMin` per triple with the exact same touching-width formula
+`buildTristarArmRectsDebug` uses, so the trimmed ribbon's own visible edge
+lands at the same point that debug marker does. `spiralLengthMultiplier`
+also reset 1.5 -> 1 (the "reach backward into the arm" behavior no longer
+applies now that the ribbon is short, and leaving it at 1.5 would still
+trigger `rebuild()`'s old arm-surface trim for no reason). Verified in
+headless Chromium: zero console errors, and a debug-overlay screenshot
+confirms full untouched star arms reaching their own natural tips, with
+the shortened connector's own edge lining up against the lime/magenta
+marker cluster.
+
+**New "Rectangle Connect" preset**: "instead of drawing the star arms,
+just connect... with a moebius-like ribbon (with half a twist) the green
+lime rectangle with the orange rectangle." `params.hideStarArms` (new,
+default false) skips the star sheet + rim entirely for every face -
+`rebuild()`'s per-face mesh loop now reads `if (isShown &&
+!params.hideStarArms)`. `buildRectangleConnectorGroup` (new,
+`spiralarm.js`) builds one Mobius-twisted ribbon per arm (60 total)
+bridging:
+- the "orange" end: that arm's own hub rectangle's far-from-rim short
+  side (the exact same corner `buildHubEdgeRectDebug` bridges from this
+  arm into its own edge rectangle - recomputed the same way, not reused
+  mesh data, since the debug overlay and this connector are built
+  independently)
+- the "lime" end: that arm's own tristar touching-point (the same
+  formula `buildTristarArmRectsDebug` computes)
+
+Reuses the existing spiral-vortex curve/frame machinery entirely (`tip`/
+`center` anchors are just generic `{tipPosition, tipTangent, tipNormal}` +
+`Vector3` objects, same as every other connector style) - `computeRibbonFrames`
+got `halfTwists` and `surfaceLift` back too (both were part of the
+reverted "Moebius Connect" commit; re-added here since this preset needs
+a real, adjustable half-twist, both still default to 0/inert for every
+other caller). New "Moebius half-twists" and "Ribbon turns" sliders,
+shown only for this connector style; the style's own sweep control reuses
+the existing `spiralSweepFrac` param under a second, differently-ID'd
+slider element (`rectSweepFrac`) so it doesn't collide with the other
+spiral styles' own slider's label id - `syncControl` special-cases keeping
+the two in sync on preset switch.
+
+Verified in headless Chromium: zero console errors, `Connectors
+(rectangleConnect): 20` (all 20 shared vertices, none missing); a
+screenshot shows a striking skeletal/cage structure with no star arms at
+all - each ribbon visibly narrow and twisting (barber-pole hex-pattern
+rotation along its length) from a peg-sized start up to a wider band where
+3 arms' ribbons cluster near each shared vertex. The other 3 existing
+presets (Stardream #1, Star Odyssey, Stardream - 3D Printing) re-checked
+individually afterward - all still build cleanly with unchanged connector
+counts, confirming `hideStarArms`/the new `hubAnchorsByLabel` computation
+(gated on `connectorStyle === 'rectangleConnect'`) don't affect any other
+preset.
+
 ## File layout
 
 ```
