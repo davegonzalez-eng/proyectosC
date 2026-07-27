@@ -1357,6 +1357,91 @@ export function buildTristarRectDebug(tipA, tipB, tipC, params = {}) {
   return buildRectMarkerGeometry(center, tangent, radial, width, thick, depth);
 }
 
+/**
+ * DEBUG "auxiliary" marker 1/2, the "edge rectangles": bridges the
+ * rim-facing side of two CONSECUTIVE arms' hub rectangles (see
+ * `buildHubRectDebug` - the box face nearest the star's rim, i.e. offset
+ * `+tangent * depth/2` from the anchor) into one quad, tracing that
+ * stretch of the pentagon hub's own boundary between them.
+ *
+ * Each rectangle's rim-facing side has two candidate corners along its own
+ * `major` axis (`+halfW`/`-halfW`) to bridge FROM; which one is actually
+ * nearest the other arm depends on `major = tangent x radial`'s sign,
+ * which isn't a fixed left/right convention per arm - so this tries all 4
+ * combinations of (A's plus/minus corner) x (B's plus/minus corner) and
+ * keeps whichever pair sits closest together, rather than assuming one.
+ * @returns {THREE.BufferGeometry} 4 vertices, meant for `THREE.LineLoop`
+ */
+export function buildHubEdgeRectDebug(anchorA, anchorB, params = {}) {
+  const { R = 1, bandHalfWidth = 0.22, thickness: armThicknessFrac = 0.015 } = params;
+  const halfW = R * bandHalfWidth;
+  const halfT = (R * armThicknessFrac) / 2;
+  const depth = R * 0.01;
+
+  const frame = (anchor) => {
+    const tangent = anchor.tipTangent;
+    const radial = anchor.tipNormal;
+    const major = new THREE.Vector3().crossVectors(tangent, radial);
+    if (major.lengthSq() < 1e-10) {
+      major.set(Math.abs(tangent.x) < 0.9 ? 1 : 0, Math.abs(tangent.x) < 0.9 ? 0 : 1, 0);
+      major.addScaledVector(tangent, -major.dot(tangent));
+    }
+    major.normalize();
+    const minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
+    const base = anchor.tipPosition.clone().addScaledVector(tangent, depth / 2);
+    return {
+      minor,
+      plus: base.clone().addScaledVector(major, halfW),
+      minus: base.clone().addScaledVector(major, -halfW),
+    };
+  };
+  const A = frame(anchorA);
+  const B = frame(anchorB);
+  const combos = [['plus', 'plus'], ['plus', 'minus'], ['minus', 'plus'], ['minus', 'minus']]
+    .map(([ka, kb]) => ({ a: A[ka], b: B[kb], d: A[ka].distanceTo(B[kb]) }))
+    .sort((x, y) => x.d - y.d);
+  const { a, b } = combos[0];
+
+  // `major`/`minor` are computed independently per anchor (no shared
+  // "previous frame" to stay continuous with, unlike `computeRibbonFrames`'
+  // own sign-flip guard along a single curve) - two different arms' minor
+  // axes can easily land pointing opposite ways. Left uncorrected, the quad
+  // below crosses itself into a bowtie/X instead of a simple loop; flipping
+  // B's minor to match A's keeps the two edges (`a`'s and `b`'s) winding
+  // the same way around the loop.
+  const minorB = A.minor.dot(B.minor) < 0 ? B.minor.clone().negate() : B.minor;
+
+  const corners = [
+    a.clone().addScaledVector(A.minor, halfT),
+    a.clone().addScaledVector(A.minor, -halfT),
+    b.clone().addScaledVector(minorB, -halfT),
+    b.clone().addScaledVector(minorB, halfT),
+  ];
+  const positions = [];
+  for (const c of corners) positions.push(c.x, c.y, c.z);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  return geometry;
+}
+
+/**
+ * DEBUG "auxiliary" marker 2/2, the "tristar arm rectangles": each of a
+ * shared vertex's 3 converging bars has a rectangular cross-section out
+ * along its own length - not just at the shared center
+ * (`buildTristarRectDebug`) - shown here at the bar's OTHER end, where it
+ * meets the star arm's own tip, sized to that tip's true half-width/
+ * half-thickness (same formula `buildSpiralVortexRibbonGroup`'s
+ * `armHalfWidth`/`armHalfThickness` use for matching a connector's start
+ * cross-section to the arm underneath it).
+ */
+export function buildTristarArmRectDebug(tip, params = {}) {
+  const { R = 1, bandHalfWidth = 0.22, tipWidthFrac = 0.15, thickness: armThicknessFrac = 0.015 } = params;
+  const width = R * bandHalfWidth * tipWidthFrac * 2;
+  const thick = R * armThicknessFrac;
+  const depth = R * 0.01;
+  return buildRectMarkerGeometry(tip.tipPosition, tip.tipTangent, tip.tipNormal, width, thick, depth);
+}
+
 function cylinderBetween(start, direction, length, radius, segments = 16) {
   const geom = new THREE.CylinderGeometry(radius, radius, length, segments, 1, false);
   geom.translate(0, length / 2, 0); // base at local origin, extends along +Y

@@ -2436,6 +2436,50 @@ slivers (correctly reading edge-on, given how much wider than thick the
 hub rectangle actually is) fanned around each hub, and compact magenta
 rectangles at all 20 shared vertices.
 
+## 42. Added a "Show auxiliary rectangles" debug toggle - edge and tristar-arm markers
+
+Two more marker sets, built FROM §41's hub-side and tristar-center
+rectangles rather than independently, behind a new "Show auxiliary
+rectangles" checkbox (own `params.debugAuxRects`, so it can be toggled
+independently of "Show connection rectangles").
+
+**Edge rectangles** (`buildHubEdgeRectDebug`, orange): bridge the
+rim-facing side of two CONSECUTIVE arms' hub rectangles (arm i to arm
+`(i+1) % armCount`, per face) into one quad - tracing the stretch of the
+pentagon hub's own boundary between them. Each rectangle offers two
+candidate corners to bridge FROM (its own `major`-axis extremes); which one
+is actually nearest the other arm depends on `major = tangent x radial`'s
+sign, which isn't a fixed left/right convention per arm, so the function
+tries all 4 combinations and keeps whichever pair sits closest together.
+
+First render showed a visible X/bowtie instead of a clean quad at every
+edge - `major`/`minor` are computed independently per anchor with no
+"previous frame" to stay continuous with (unlike `computeRibbonFrames`'
+own sign-flip guard along a single curve), so two different arms' `minor`
+axes easily land pointing opposite ways; left uncorrected, the 4 corners
+wind inconsistently and the loop crosses itself. Fixed by flipping the
+second anchor's `minor` when `A.minor.dot(B.minor) < 0`. Verified
+programmatically (not just visually, since a genuinely simple quad can
+still look like an X onscreen at a shallow viewing angle): a standalone
+Node script rebuilt all 60 edge rectangles from real `computeHubAnchors`
+data and checked both pairs of opposite edges for intersection after
+projecting each quad onto its own best-fit plane - 0 bowties across all 60
+after the fix.
+
+**Tristar arm rectangles** (`buildTristarArmRectDebug`, lime green): each
+shared vertex's 3 converging bars has a rectangular cross-section out along
+its own length, not just at the shared center (already covered by §41's
+magenta marker) - shown at the bar's OTHER end instead, where it meets the
+star arm's own tip, sized to that tip's true half-width/half-thickness
+(the same `armHalfWidth`/`armHalfThickness` formula
+`buildSpiralVortexRibbonGroup` uses to match a real connector's start
+cross-section to the arm underneath it).
+
+Verified: headless Chromium, zero console errors with both debug toggles
+on together on Stardream #1; screenshot shows all 5 marker colors at once
+(cyan hub rings, yellow hub rectangles, orange edge rectangles, lime arm
+rectangles, magenta tristar-center rectangles) without visual conflicts.
+
 ## File layout
 
 ```
