@@ -1429,28 +1429,42 @@ export function buildHubEdgeRectDebug(anchorA, tipA, anchorB, tipB, params = {})
  * DEBUG "auxiliary" marker 2/2, the "tristar arm rectangles": each of a
  * shared vertex's 3 converging bars has a rectangular cross-section out
  * along its own length - not just at the shared center
- * (`buildTristarRectDebug`) - sized to its tip's true half-width/
- * half-thickness (same formula `buildSpiralVortexRibbonGroup`'s
- * `armHalfWidth`/`armHalfThickness` use for matching a connector's start
- * cross-section to the arm underneath it), but positioned not AT the tip -
- * slid straight toward the shared center, stopping at the point where all
- * 3 bars' same-size cross-sections would just start touching each other,
- * rather than the tip itself (reported: markers at the raw tip read too
- * far from where the three bands actually connect).
+ * (`buildTristarRectDebug`) - positioned by sliding from the tip straight
+ * toward the shared center, stopping where all 3 bars' cross-sections
+ * would just start touching each other.
  *
  * Since each bar's position interpolates straight toward the exact SAME
  * `center` point, the gap between bar i and bar j's positions scales
  * exactly as `(1 - t) * (their tip-to-tip distance)` - so the fraction `t`
- * at which that gap first equals the sum of their (fixed) half-widths has
- * a closed form, no iteration needed. The largest `t` across all 3 pairs
- * is used for all 3 markers, so none of the three pairs has already
- * started overlapping by the time they're drawn.
+ * at which that gap first equals a chosen touching-width has a closed
+ * form, no iteration needed. The largest `t` across all 3 pairs is used
+ * for all 3 markers, so none of the three pairs has already started
+ * overlapping by the time they're drawn.
+ *
+ * The first version used the tip's own true half-width (same formula
+ * `buildSpiralVortexRibbonGroup`'s `armHalfWidth` uses) for BOTH the
+ * rendered box size AND the touching-width in the formula above - reported
+ * as reading about 2x too wide and landing about 3x too far from the
+ * triangle's own center than expected. `renderWidthFrac`/`touchWidthFrac`
+ * apply those two corrections as independent fractions of that same true
+ * tip width (1/2 and 1/3 respectively) rather than re-deriving an exact
+ * touching geometry (which would need the true angle between each bar's
+ * own width axis and the direction to its neighbor - not a fixed ratio
+ * this module currently computes).
  * @returns {THREE.BufferGeometry[]} one box geometry per tip, same order as tipA/tipB/tipC
  */
 export function buildTristarArmRectsDebug(tipA, tipB, tipC, params = {}) {
-  const { R = 1, bandHalfWidth = 0.22, tipWidthFrac = 0.15, thickness: armThicknessFrac = 0.015 } = params;
-  const halfWidth = R * bandHalfWidth * tipWidthFrac;
-  const width = halfWidth * 2;
+  const {
+    R = 1,
+    bandHalfWidth = 0.22,
+    tipWidthFrac = 0.15,
+    thickness: armThicknessFrac = 0.015,
+    renderWidthFrac = 0.5,
+    touchWidthFrac = 1 / 3,
+  } = params;
+  const trueWidth = R * bandHalfWidth * tipWidthFrac * 2;
+  const renderWidth = trueWidth * renderWidthFrac;
+  const touchWidth = trueWidth * touchWidthFrac;
   const thick = R * armThicknessFrac;
   const depth = R * 0.01;
   const center = hornTriangleCenter(tipA, tipB, tipC);
@@ -1461,7 +1475,7 @@ export function buildTristarArmRectsDebug(tipA, tipB, tipC, params = {}) {
     const a = tips[i], b = tips[(i + 1) % 3];
     const d = a.tipPosition.distanceTo(b.tipPosition);
     if (d < 1e-9) continue;
-    const pairT = 1 - width / d;
+    const pairT = 1 - touchWidth / d;
     t = Math.max(t, Math.min(1, Math.max(0, pairT)));
   }
 
@@ -1470,7 +1484,7 @@ export function buildTristarArmRectsDebug(tipA, tipB, tipC, params = {}) {
     const toCenter = center.clone().sub(tip.tipPosition);
     const tangent = toCenter.lengthSq() > 1e-12 ? toCenter.normalize() : tip.tipTangent.clone();
     const radial = position.clone().normalize();
-    return buildRectMarkerGeometry(position, tangent, radial, width, thick, depth);
+    return buildRectMarkerGeometry(position, tangent, radial, renderWidth, thick, depth);
   });
 }
 

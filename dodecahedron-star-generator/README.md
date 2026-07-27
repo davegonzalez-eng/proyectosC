@@ -2535,6 +2535,37 @@ on which side is picked, only that both rectangles in a pair pick
 consistently-wound corners), and zero console errors in headless Chromium
 with both debug toggles on.
 
+## 45. Rescaled the tristar arm rectangles per measured feedback (confirmed at hub radius 0.39, orange rectangles now exactly right)
+
+Follow-up on §43/§44: the orange edge rectangles were confirmed exactly
+right (at `hubRadiusFrac` 0.39). The lime tristar-arm rectangles were
+"almost there" but reported as reading about 2x too wide and landing about
+3x too far from the triangle's own center (the centroid of the 3 markers
+themselves, not `hornTriangleCenter` the star geometry defines) than
+expected.
+
+`buildTristarArmRectsDebug` previously used one quantity - the tip's own
+true half-width - for both the rendered box size AND the touching-width in
+its closed-form `t` calculation. Introduced two independent fractions of
+that same true width instead: `renderWidthFrac` (default 0.5, halving the
+box) and `touchWidthFrac` (default 1/3, so the computed meeting point sits
+a third as far from center as before). These are empirical corrections
+matching the two measurements reported, not a re-derivation of an exact
+touching geometry - an exact version would need the true angle between
+each bar's own width axis and the direction to its neighbor at the meeting
+point, which this module doesn't compute and which likely varies per
+triple anyway given the surface's own bulge/twist/tip-bend distortions.
+
+Verified with a standalone script: rendered box size roughly halved (one
+box's own bounding-box max dimension 0.018 vs the old undivided width
+0.034), and the marker-to-true-center distance dropped from 0.0193 (the
+§43 measurement) to 0.0065 - a 2.99x reduction, matching the reported "3x
+too far" almost exactly. Headless Chromium re-check at `hubRadiusFrac`
+0.39 with both debug toggles on: zero console errors, and the lime/magenta
+markers now render as small, tight clusters right at each of the 20
+shared-vertex convergence points instead of spread further out along the
+bars.
+
 ## File layout
 
 ```
