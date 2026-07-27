@@ -2399,6 +2399,43 @@ screenshot at the same hub region was queued to directly confirm the plate
 is gone but had not completed by the time this round was pushed (recurring
 headless-environment slowness, consistent with prior rounds).
 
+## 41. Reverted "Moebius Connect"; added a "Show connection rectangles" debug mode
+
+The "Moebius Connect" preset (a hub-to-vertex band with a half-twist) from
+the previous round was reverted per request. In its place: a new,
+preset-independent debug toggle visualizing the two rectangles that
+attempt was trying to join, plus the hub itself, without building any
+actual connector.
+
+`computeHubAnchors` (`spiralarm.js`) came back from the reverted commit
+essentially unchanged - it's a clean, self-contained query (same shape as
+`computeArmTips`, anchored at the opposite/hub end of an arm's centerline)
+with no dependency on the reverted connector code. Three new debug-only
+builders sit next to it: `buildHubRingDebug` (a ring at each face's own
+`hubRadiusFrac * R_out`, sampled through `mapStarPoint` so it actually
+follows the surface's bulge/twist/dip instead of floating flat - "where
+the hub is"), `buildHubRectDebug` (a thin box at each arm's hub anchor,
+sized to the hub's own full width/thickness), and `buildTristarRectDebug`
+(a thin box at each shared vertex's `hornTriangleCenter`, sized to the
+width/thickness `buildSpiralVortexRibbonGroup`'s bands converge to there).
+
+Wired into `spiral-dodeca-main.js` as `params.debugConnections` (default
+off) and a new "Show connection rectangles" checkbox in the Debug section -
+independent of `connectorStyle`, so it overlays on top of whichever preset
+is active rather than only working with one. Rendered with dedicated unlit
+`LineBasicMaterial`s (`depthTest: false`, so the markers stay visible
+through the opaque sculpture instead of being hidden behind it) in 3
+colors: cyan for the hub ring, yellow for the hub-side rectangle, magenta
+for the tristar rectangle.
+
+Verified: headless Chromium, zero console errors on both Stardream #1 (60
+hornArc connectors, unaffected by the debug params) and Star Odyssey -
+Thick Bands (20 spiralRibbon connectors) with the toggle on; screenshots at
+both show the expected cyan rings at every face's own hub, thin yellow
+slivers (correctly reading edge-on, given how much wider than thick the
+hub rectangle actually is) fanned around each hub, and compact magenta
+rectangles at all 20 shared vertices.
+
 ## File layout
 
 ```

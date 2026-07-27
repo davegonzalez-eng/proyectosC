@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections, computeThreeCycles } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeHubAnchors, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup, buildHubRingDebug, buildHubRectDebug, buildTristarRectDebug } from './spiralarm.js';
 import { createPerforationTexture, createCoralMazeTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -124,6 +124,15 @@ const MATERIAL_PRESETS = {
 // since the holes are wide relative to the rim's own width.
 const sculptureMaterial = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
 const rimMaterial = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
+
+// Debug mode: unlit line materials (so they read the same regardless of
+// which material preset or lamp mode is active) for the 3 markers
+// `rebuild()` draws when `params.debugConnections` is on - see
+// buildHubRingDebug/buildHubRectDebug/buildTristarRectDebug in
+// spiralarm.js for what each one actually delineates.
+const debugHubRingMaterial = new THREE.LineBasicMaterial({ color: 0x33e6ff, depthTest: false, transparent: true, opacity: 0.9 });
+const debugHubRectMaterial = new THREE.LineBasicMaterial({ color: 0xffe066, depthTest: false, transparent: true, opacity: 0.9 });
+const debugTristarRectMaterial = new THREE.LineBasicMaterial({ color: 0xff4fd8, depthTest: false, transparent: true, opacity: 0.9 });
 
 function applyMaterialPreset(name) {
   const p = MATERIAL_PRESETS[name] || MATERIAL_PRESETS.golden;
@@ -231,6 +240,13 @@ const params = {
   lampIntensity: 19,
   // Debug: click a face to hide it (its star sheet + rim).
   debugFacePick: true,
+  // Debug: draw the hub-boundary ring on every face plus wireframe markers
+  // for the two rectangles a hub-to-vertex connector would need to join
+  // (the hub-side cross-section and the shared vertex's "Mercedes tristar"
+  // cross-section) - see buildHubRingDebug/buildHubRectDebug/
+  // buildTristarRectDebug in spiralarm.js. Independent of connectorStyle -
+  // works as an overlay on top of whatever preset is active.
+  debugConnections: false,
   // Cross-section clipping plane.
   clipEnabled: false,
   clipAxis: 'z',
@@ -467,6 +483,7 @@ const PRESETS = {
 let starGroup = null;
 let extGroup = null;
 let rimGroup = null;
+let debugGroup = null;
 let flyoverCurve = null;
 let flyoverLookOffsets = null;
 let flyoverNormals = null;
@@ -889,7 +906,7 @@ function buildFlyoverPath(star2D, faces, tipsByLabel, connections, threeCycles, 
 }
 
 function rebuild() {
-  for (const g of [starGroup, extGroup, rimGroup]) {
+  for (const g of [starGroup, extGroup, rimGroup, debugGroup]) {
     if (g) {
       scene.remove(g);
       disposeGroup(g);
@@ -898,6 +915,7 @@ function rebuild() {
   starGroup = new THREE.Group();
   extGroup = new THREE.Group();
   rimGroup = new THREE.Group();
+  debugGroup = new THREE.Group();
 
   // The 2D star (field union of 5 arms + hub, marching squares,
   // triangulation, subdivision) is identical for every face - built once.
@@ -1069,9 +1087,29 @@ function rebuild() {
     }
   }
 
+  if (params.debugConnections) {
+    for (const face of faces) {
+      const ring = new THREE.LineLoop(buildHubRingDebug(face, params), debugHubRingMaterial);
+      debugGroup.add(ring);
+      for (const anchor of computeHubAnchors(star2D, face, params)) {
+        const boxGeom = buildHubRectDebug(anchor, { R, ...params });
+        debugGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(boxGeom), debugHubRectMaterial));
+        boxGeom.dispose();
+      }
+    }
+    for (const triple of threeCycles) {
+      const tips = triple.map((label) => tipsByLabel.get(label));
+      if (tips.some((t) => !t)) continue;
+      const boxGeom = buildTristarRectDebug(tips[0], tips[1], tips[2], { R, ...params });
+      debugGroup.add(new THREE.LineSegments(new THREE.EdgesGeometry(boxGeom), debugTristarRectMaterial));
+      boxGeom.dispose();
+    }
+  }
+
   scene.add(starGroup);
   scene.add(extGroup);
   scene.add(rimGroup);
+  scene.add(debugGroup);
   applyHiddenFaces();
 
   document.getElementById('metrics').innerHTML =
@@ -1164,6 +1202,10 @@ document.getElementById('lampIntensity').addEventListener('input', (e) => {
 });
 document.getElementById('debugFacePick').addEventListener('change', (e) => {
   params.debugFacePick = e.target.checked;
+});
+document.getElementById('debugConnections').addEventListener('change', (e) => {
+  params.debugConnections = e.target.checked;
+  rebuild();
 });
 document.getElementById('clipEnabled').addEventListener('change', (e) => {
   params.clipEnabled = e.target.checked;

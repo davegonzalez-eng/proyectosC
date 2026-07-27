@@ -981,6 +981,39 @@ export function computeArmTips(star2D, face, params = {}) {
 }
 
 /**
+ * The hub-side counterpart to `computeArmTips`: same shape
+ * ({tipPosition, tipTangent, tipNormal, armIndex}), but anchored at the
+ * FAR end of each arm's centerline (`armPolylines2D`'s last sample, right
+ * at the hub near the face center) instead of the near-rim tip. Currently
+ * used only by the debug-mode markers in `spiral-dodeca-main.js`
+ * (`buildHubRectDebug` below) to show where a hub-anchored connector would
+ * actually start. `tipTangent` points OUTWARD from the hub (toward that
+ * arm's own tip), matching `computeArmTips`' own "tangent points away from
+ * the center" convention at the opposite end.
+ * @returns {{armIndex: number, tipPosition: THREE.Vector3, tipTangent: THREE.Vector3, tipNormal: THREE.Vector3}[]}
+ */
+export function computeHubAnchors(star2D, face, params = {}) {
+  const R = star2D.R;
+  const place = (u, w) => mapStarPoint(u, w, R, face, params);
+  const eps = R * 1e-3;
+  return star2D.armPolylines2D.map((pts, armIndex) => {
+    const n = pts.length;
+    const hub2D = pts[n - 1];
+    const prev2D = pts[n - 2];
+    const p0 = place(hub2D.x, hub2D.y);
+    const p1 = place(prev2D.x, prev2D.y);
+    const tangent = p1.clone().sub(p0).normalize();
+    const pu = place(hub2D.x + eps, hub2D.y).sub(place(hub2D.x - eps, hub2D.y));
+    const pw = place(hub2D.x, hub2D.y + eps).sub(place(hub2D.x, hub2D.y - eps));
+    const tipNormal = new THREE.Vector3().crossVectors(pu, pw);
+    if (tipNormal.lengthSq() < 1e-16) tipNormal.copy(p0).normalize();
+    else tipNormal.normalize();
+    if (tipNormal.dot(face.normal) < 0) tipNormal.negate();
+    return { armIndex, tipPosition: p0, tipTangent: tangent, tipNormal };
+  });
+}
+
+/**
  * A raised bead tracing every boundary loop of the solid star (outer
  * silhouette AND every gap/hole edge) - the smooth-shaded field-based sheet
  * on its own reads as a flat cutout; a defined rim/bezel along every edge
@@ -1230,6 +1263,98 @@ export function hornTriangleCenter(tipA, tipB, tipC) {
     .add(tipB.tipPosition)
     .add(tipC.tipPosition)
     .multiplyScalar(1 / 3);
+}
+
+// ---------------------------------------------------------------------
+// DEBUG MODE: three markers ("Show connection rectangles" in the panel)
+// visualizing the two rectangles a hub-to-vertex connector (the reverted
+// "Moebius Connect" attempt) would need to join, plus where the hub itself
+// sits - built fresh so the shapes can be inspected on their own, decoupled
+// from any actual connector geometry. Not wired into any connectorStyle;
+// `rebuild()` draws these as an independent overlay whenever
+// `params.debugConnections` is on, regardless of which preset is active.
+// ---------------------------------------------------------------------
+
+/**
+ * Shared cross-section box builder for the two debug rectangles below:
+ * a plain BoxGeometry (width along `tangent x radial`, thickness along the
+ * remaining axis, `depth` a thin sliver along `tangent` itself just so it
+ * reads as a flat plate rather than a zero-volume quad) positioned and
+ * oriented at `position`. Callers wrap the result in `THREE.EdgesGeometry`
+ * for a wireframe outline.
+ */
+function buildRectMarkerGeometry(position, tangent, radial, width, thick, depth) {
+  const major = new THREE.Vector3().crossVectors(tangent, radial);
+  if (major.lengthSq() < 1e-10) {
+    major.set(Math.abs(tangent.x) < 0.9 ? 1 : 0, Math.abs(tangent.x) < 0.9 ? 0 : 1, 0);
+    major.addScaledVector(tangent, -major.dot(tangent));
+  }
+  major.normalize();
+  const minor = new THREE.Vector3().crossVectors(tangent, major).normalize();
+  const geometry = new THREE.BoxGeometry(width, thick, depth);
+  geometry.applyMatrix4(new THREE.Matrix4().makeBasis(major, minor, tangent));
+  geometry.translate(position.x, position.y, position.z);
+  return geometry;
+}
+
+/**
+ * DEBUG: a thin ring outline at a face's own hub radius (`hubRadiusFrac *
+ * R_out`), sampled through `mapStarPoint` (not a flat face.center + U/W
+ * circle) so it actually rides on the star surface's own bulge/twist/dip
+ * at the hub instead of floating off it - "where the hub is".
+ */
+export function buildHubRingDebug(face, params = {}) {
+  const { hubRadiusFrac = 0.16, segments = 64 } = params;
+  const R = face.R_out;
+  const radius = R * hubRadiusFrac;
+  const positions = [];
+  for (let i = 0; i <= segments; i++) {
+    const a = (i / segments) * Math.PI * 2;
+    const p = mapStarPoint(radius * Math.cos(a), radius * Math.sin(a), R, face, params);
+    positions.push(p.x, p.y, p.z);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  return geometry;
+}
+
+/**
+ * DEBUG: the pentagon hub's own full-width/thickness cross-section at one
+ * arm's hub-side anchor (see `computeHubAnchors`) - sized exactly
+ * `bandHalfWidth * 2` (the star's own hub width, where `buildSolidStar2D`'s
+ * arms reach their widest) by `thickness` (the star sheet's own uniform
+ * thickness, see `mapSolidStarToFace`'s constant `halfT`), oriented the
+ * same way `computeRibbonFrames` orients a connector cross-section (major =
+ * tangent x radial, minor = tangent x major).
+ */
+export function buildHubRectDebug(anchor, params = {}) {
+  const { R = 1, bandHalfWidth = 0.22, thickness: armThicknessFrac = 0.015 } = params;
+  const width = R * bandHalfWidth * 2;
+  const thick = R * armThicknessFrac;
+  const depth = R * 0.01;
+  return buildRectMarkerGeometry(anchor.tipPosition, anchor.tipTangent, anchor.tipNormal, width, thick, depth);
+}
+
+/**
+ * DEBUG: the shared vertex's own "Mercedes tristar" cross-section - the
+ * target width/thickness `buildSpiralVortexRibbonGroup`'s bands converge to
+ * at `hornTriangleCenter` (its fixed 1.4x flare over `spiralRibbonWidthFrac`,
+ * see computeRibbonFrames' endWidthFrac default, and `spiralRibbonThicknessFrac`
+ * directly). Oriented off one of the three converging tips' own incoming
+ * direction (arbitrary but consistent - the three bands arrive from
+ * different angles, so there's no single "correct" orientation, only a
+ * representative one).
+ */
+export function buildTristarRectDebug(tipA, tipB, tipC, params = {}) {
+  const { R = 1, spiralRibbonWidthFrac = 0.09, spiralRibbonThicknessFrac = 0.012 } = params;
+  const center = hornTriangleCenter(tipA, tipB, tipC);
+  const width = R * spiralRibbonWidthFrac * 1.4;
+  const thick = R * spiralRibbonThicknessFrac;
+  const depth = R * 0.01;
+  const tangent = tipA.tipPosition.clone().sub(center);
+  if (tangent.lengthSq() < 1e-10) tangent.set(1, 0, 0); else tangent.normalize();
+  const radial = center.clone().normalize();
+  return buildRectMarkerGeometry(center, tangent, radial, width, thick, depth);
 }
 
 function cylinderBetween(start, direction, length, radius, segments = 16) {
