@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections, computeThreeCycles } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeHubAnchors, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup, buildMoebiusConnectorGroup } from './spiralarm.js';
 import { createPerforationTexture, createCoralMazeTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -309,6 +309,13 @@ const params = {
   // against it) is fixed in `buildSpiralVortexRibbonArm`, not a param here.
   spiralRibbonWidthFrac: 0.09,
   spiralRibbonThicknessFrac: 0.012,
+  // "Moebius Connect" connector shape: one band per tip running all the way
+  // from its own arm's HUB-side rectangle (not the tip) out to the shared
+  // vertex's Mercedes-tristar rectangle, with a Mobius-style half-twist
+  // ramped in along its length - see buildMoebiusConnectorGroup. In
+  // half-twists (180deg each); 1 is the textbook single Mobius half-twist.
+  moebiusHalfTwists: 1,
+  moebiusTurns: 0.12,
 };
 
 // Three named parameter bundles, applied wholesale via setParams() from the
@@ -459,6 +466,31 @@ const PRESETS = {
     // this number no longer needs to reach the arm's own ~0.348 for the
     // two surfaces to meet cleanly.
     spiralRibbonWidthFrac: 0.11, spiralRibbonThicknessFrac: 0.03,
+    material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
+    lampMode: false, lampIntensity: 19,
+  },
+  // Same star shape as `odysseyThickBands` again, but `connectorStyle:
+  // 'moebiusConnect'` starts each band at its own arm's HUB-side rectangle
+  // (the pentagon hub's own full width, near the face center) instead of
+  // near the tip, running the WHOLE way out to the shared vertex's
+  // Mercedes-tristar rectangle as one continuous band, with a real
+  // (user-adjustable) Mobius half-twist ramped in along the way - see
+  // buildMoebiusConnectorGroup. The star's own arm sheet still renders
+  // underneath the band's whole length (see that function's own doc for
+  // why a full-arm trim isn't attempted), so `moebiusRimProudFrac`-style
+  // lift is what keeps the two from z-fighting rather than a cut.
+  moebiusConnect: {
+    starRotationDeg: 14, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.14,
+    bandHalfWidth: 0.305, tipWidthFrac: 0.57, widthTaperPower: 0.9,
+    thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
+    tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
+    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
+    showExtensions: true, showRim: true, rimWidthFrac: 0.02, rimProudFrac: 0.02,
+    fieldGrid: 144,
+    singleFaceMode: false, connectorStyle: 'moebiusConnect', snapEnabled: false,
+    spiralSweepFrac: 0.06, spiralLaunchFrac: 0, spiralLengthMultiplier: 1,
+    spiralRibbonWidthFrac: 0.11, spiralRibbonThicknessFrac: 0.03,
+    moebiusHalfTwists: 1, moebiusTurns: 0.12,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: false, lampIntensity: 19,
   },
@@ -918,6 +950,20 @@ function rebuild() {
     }
   }
 
+  // Moebius Connect's own anchor, at the opposite (hub) end of each arm -
+  // same label scheme as `tipsByLabel` so a given triple's tips and their
+  // own faces' hub anchors can be looked up together. Only built when
+  // actually needed; every other connector style anchors at the tip.
+  /** @type {Map<string, {tipPosition: THREE.Vector3, tipTangent: THREE.Vector3, tipNormal: THREE.Vector3}>} */
+  const hubAnchorsByLabel = new Map();
+  if (params.connectorStyle === 'moebiusConnect') {
+    for (const face of faces) {
+      for (const anchor of computeHubAnchors(star2D, face, params)) {
+        hubAnchorsByLabel.set(`F${face.index}-A${anchor.armIndex}`, anchor);
+      }
+    }
+  }
+
   // Star Odyssey - Thick Bands: work out, for every arm tip, how far back
   // into the arm the `spiralRibbon` connector now reaches (mirroring
   // `spiralVortexPointAt`'s own `offsetFrac` math exactly) - if it reaches
@@ -1066,6 +1112,25 @@ function rebuild() {
         extGroup.add(ribbonGroup);
         connectorCount++;
       }
+    } else if (params.connectorStyle === 'moebiusConnect') {
+      // Moebius Connect: each of a vertex's 3 bands starts at its OWN
+      // face's hub (not that face's tip) and runs the whole way out to the
+      // shared vertex, so both the tips (still needed for `hornTriangleCenter`)
+      // and each tip's own hub anchor are required here.
+      for (const triple of threeCycles) {
+        const tips = triple.map((label) => tipsByLabel.get(label));
+        const hubAnchors = triple.map((label) => hubAnchorsByLabel.get(label));
+        if (tips.some((t) => !t) || hubAnchors.some((h) => !h)) { missing++; continue; }
+        const moebiusGroup = buildMoebiusConnectorGroup(
+          hubAnchors[0], hubAnchors[1], hubAnchors[2], tips[0], tips[1], tips[2], { R, ...params }
+        );
+        // Same reasoning as `spiralRibbon`: real arc-length x width UVs, so
+        // the shared hex-perforation material reads at a consistent scale
+        // instead of a bare unlit strip against the star's own texture.
+        moebiusGroup.children.forEach((m) => { m.material = sculptureMaterial; });
+        extGroup.add(moebiusGroup);
+        connectorCount++;
+      }
     }
   }
 
@@ -1132,6 +1197,8 @@ bindSlider('spiralLengthMultiplier', 'spiralLengthMultiplier');
 bindSlider('spiralArcWidthFrac', 'spiralArcWidthFrac');
 bindSlider('spiralRibbonWidthFrac', 'spiralRibbonWidthFrac');
 bindSlider('spiralRibbonThicknessFrac', 'spiralRibbonThicknessFrac');
+bindSlider('moebiusHalfTwists', 'moebiusHalfTwists');
+bindSlider('moebiusTurns', 'moebiusTurns');
 bindSlider('rimWidthFrac', 'rimWidthFrac');
 bindSlider('rimProudFrac', 'rimProudFrac');
 bindSlider('holeSize', 'holeSize', { appearanceOnly: true });
@@ -1199,6 +1266,7 @@ const PRESET_HINTS = {
   starOdyssey: "Same stars as #1, but every horn-triangle arc is replaced by a 3-way spiral funnel converging at that vertex's center.",
   odysseyThicker: 'Star Odyssey with wider, chunkier tips and a smaller hub - a second live-tuned variant.',
   odysseyThickBands: 'Star Odyssey with the spiral connectors as flat, wide ribbons instead of tapered tubes, flush with the sphere and flaring out into one broad fused hub - Mercedes tristar style - at the shared vertex center where the three bands meet.',
+  moebiusConnect: "Same stars again, but each connector band now starts at its own arm's hub (not its tip) and runs the whole way out to the shared vertex's Mercedes-tristar hub as one piece, carrying an adjustable Mobius half-twist along the way.",
 };
 // Each connector style has its own shape sliders (the horn arc's
 // length/depth/clothoid params mean nothing to the spiral vortex, and vice
@@ -1207,13 +1275,15 @@ const PRESET_HINTS = {
 // this: Star Odyssey used the horn-arc panel's sliders (and its own
 // "Show connectors" checkbox check) despite reading none of those params.
 function updateConnectorControlsVisibility() {
-  const isSpiral = params.connectorStyle === 'spiralVortex' || params.connectorStyle === 'spiralRibbon';
+  const isSpiral = params.connectorStyle === 'spiralVortex' || params.connectorStyle === 'spiralRibbon' || params.connectorStyle === 'moebiusConnect';
   document.getElementById('hornArcControls').style.display = params.connectorStyle === 'hornArc' ? 'block' : 'none';
-  // Turns/sweep shape the same underlying curve for both spiral styles;
-  // width is style-specific (tube radius vs. ribbon width+thickness+twist).
+  // Turns/sweep shape the same underlying curve for all three spiral
+  // styles; width is style-specific (tube radius vs. ribbon width+
+  // thickness+twist vs. Moebius hub-to-vertex width+thickness+twist).
   document.getElementById('spiralCurveControls').style.display = isSpiral ? 'block' : 'none';
   document.getElementById('spiralVortexTubeControls').style.display = params.connectorStyle === 'spiralVortex' ? 'block' : 'none';
-  document.getElementById('spiralRibbonControls').style.display = params.connectorStyle === 'spiralRibbon' ? 'block' : 'none';
+  document.getElementById('spiralRibbonControls').style.display = params.connectorStyle === 'spiralRibbon' || params.connectorStyle === 'moebiusConnect' ? 'block' : 'none';
+  document.getElementById('moebiusTwistControls').style.display = params.connectorStyle === 'moebiusConnect' ? 'block' : 'none';
 }
 document.getElementById('preset').addEventListener('change', (e) => {
   const name = e.target.value;

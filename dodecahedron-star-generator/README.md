@@ -2399,6 +2399,54 @@ screenshot at the same hub region was queued to directly confirm the plate
 is gone but had not completed by the time this round was pushed (recurring
 headless-environment slowness, consistent with prior rounds).
 
+## 41. New "Moebius Connect" preset - one band per tip, hub to shared vertex, real half-twist
+
+Request: a sixth preset connecting two specific rectangles already implicit
+in the model - a "Mercedes tristar" band's cross-section at the shared
+vertex, and the pentagon hub's own cross-section (full "star width") at
+each arm's base - as one band per tip, starting with a half-twist between
+the two, joined without gaps and with matching slopes at both ends.
+
+`computeHubAnchors` (`spiralarm.js`), mirroring `computeArmTips` but reading
+the FAR end of each arm's own `armPolylines2D` centerline (the hub, not the
+rim tip): same `{tipPosition, tipTangent, tipNormal}` shape, so it drops
+straight into `spiralVortexPointAt`/`computeRibbonFrames` as if it were a
+real tip - `buildMoebiusConnectorGroup` calls the existing (unexported)
+`buildSpiralVortexRibbonArm`/`Rim` with a hub anchor instead of a tip
+anchor, `armHalfWidth`/`armHalfThickness` set to the hub's own full
+width/thickness (matching the start rectangle with zero gap, the same
+mechanism the plain ribbon connector already uses to match the arm's TIP),
+and `endWidthFrac` computed so the far end lands on the exact same
+converged width the ordinary tip-anchored ribbon reaches at that vertex (so
+a Moebius band and a plain ribbon reaching the same vertex fuse into a
+consistently-sized hub either way).
+
+The half-twist itself is new: `computeRibbonFrames` gained a `halfTwists`
+option (default 0, so every existing caller is untouched) that rotates the
+cross-section's (major, minor) frame about its own tangent, ramped
+smoothstep from 0 at the hub to `halfTwists * 180deg` at the shared vertex -
+`moebiusHalfTwists` in the UI, defaulting to 1 (the textbook single
+Mobius-strip half-twist) per the request's "initial value of half twist".
+
+Left deliberately unsolved: the star's own arm sheet still renders
+underneath the band's whole length (unlike `spiralRibbon`, which trims the
+arm back near the tip) - a single cut plane can isolate the plain ribbon's
+short near-tip span from neighboring arms, but can't safely isolate one
+arm's WHOLE length this close to where all 5 converge at the hub without
+per-arm boundary re-triangulation the module doesn't have. Added a
+`surfaceLift` option to `computeRibbonFrames` instead (a small constant
+offset along the frame's own `minor` axis) so the band sits visibly proud
+of the untouched arm sheet rather than z-fighting with it.
+
+Verified: headless Chromium, zero console errors, `Connectors
+(moebiusConnect): 20` (all 20 shared vertices built, none missing);
+zoomed-crop screenshot shows continuous twisting bands with no visible
+holes or floating geometry. The other 5 presets re-checked individually
+afterward (fresh browser per preset, after clearing stray Chromium
+processes from back-to-back headless runs) - all still build cleanly,
+confirming the new optional `computeRibbonFrames` params left
+`spiralRibbon`'s own (default-valued) behavior unchanged.
+
 ## File layout
 
 ```
