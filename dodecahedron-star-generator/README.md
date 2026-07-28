@@ -2681,6 +2681,24 @@ face center without dominating the connectors, and the ribbons clearly
 funnel from a wide flared base down to a narrow twisted point at each
 shared vertex - the reverse of §46's shipped shape.
 
+## 48. Rectangle Connect: reversed the Mobius twist handedness
+
+Follow-up feedback on §47: the taper direction was right, but the twist
+itself was rotating the wrong way round - "exact opposite direction of
+twisting, please."
+
+`computeRibbonFrames`'s twist angle (`halfTwists * Math.PI * widthT`) is
+directly proportional to `halfTwists`'s own sign, so the fix is a single
+negation at the one call site that builds this ribbon:
+`buildRectangleConnectorGroup` now passes `halfTwists: -moebiusHalfTwists`
+instead of `moebiusHalfTwists` in its `shared` frame options. This flips
+only this connector's handedness - the shared `computeRibbonFrames` formula
+and every other caller of it are untouched.
+
+Verified in headless Chromium: zero console errors, connector count
+unchanged (20/20 tips, 20 connectors). Screenshot confirms the same
+wide-orange-to-narrow-lime funnel taper as §47, now spinning the other way.
+
 ## File layout
 
 ```

@@ -2209,7 +2209,11 @@ export function buildRectangleConnectorGroup(tipA, tipB, tipC, edgeAnchorA, edge
       startWidth: edge.width,
       endWidthFrac: renderWidth / edge.width,
       thickness: edge.thickness,
-      halfTwists: moebiusHalfTwists,
+      // Negated - reported as twisting the wrong way; `computeRibbonFrames`'
+      // twist angle is directly proportional to `halfTwists`' own sign, so
+      // flipping just this one's sign reverses the direction without
+      // touching the shared formula or any other caller.
+      halfTwists: -moebiusHalfTwists,
     };
     const geom = buildSpiralVortexRibbonArm(hubEndAnchor, limePosition, shared);
     group.add(new THREE.Mesh(geom));
