@@ -2633,6 +2633,54 @@ counts, confirming `hideStarArms`/the new `hubAnchorsByLabel` computation
 (gated on `connectorStyle === 'rectangleConnect'`) don't affect any other
 preset.
 
+## 47. Rectangle Connect: draw the star hubs, and fix the width taper direction
+
+Feedback after §46 shipped: "that turned pretty bad." Two real problems,
+both now fixed.
+
+**Missing hubs.** `hideStarArms` skipped the WHOLE star mesh, but
+`buildSolidStar2D`'s hub disc is baked into that same single fused
+arms+hub field - with the mesh gone there was nothing left at the face
+center at all. `buildHubCap` (a separate, already-existing standalone
+disc builder, previously only used by the old single-spiral-arm
+prototype, never wired into this main sculpture pipeline) now fills that
+in whenever `hideStarArms` is on, added to `starGroup` with `rimMaterial`
+(no UV needed, and the disc has none). First attempt reused
+`buildSolidStar2D`'s own `hubRadiusFrac * 1.5` cap-radius fallback, sized
+for presets with a small `hubRadiusFrac` and arms covering everything out
+to it - at this preset's much larger 0.39 that produced a disc wide
+enough to swallow the connectors' own wide ends entirely. Rescaled to a
+small, deliberately modest nub instead (`min(max(hubRadiusFrac * 0.3,
+0.05), 0.12)`).
+
+**Backward taper.** The ribbon was built narrow-to-wide (peg-thin at the
+hub end, flaring out to the lime marker's own width at the far end) -
+exactly backward, since the "orange" hub-edge bridge (a whole span between
+two consecutive arms' hub rectangles) is actually WIDER than the lime
+marker's own deliberately-fractional render width. Root cause: the
+connector was anchored to a single arm's own far-side point (using just
+its thin local thickness as the start width) rather than the FULL bridge
+between two arms. New `computeHubEdgeAnchors` (`spiralarm.js`) computes
+that bridge properly - one per arm (`armIndex` = the edge starting there),
+giving its midpoint and full span width, mirroring
+`buildHubEdgeRectDebug`'s own far-side selection but returning the
+midpoint/width instead of loop geometry. `buildRectangleConnectorGroup`
+now takes these edge anchors (replacing the raw hub anchors it took
+before) and starts each ribbon at `startWidth: edge.width` - already wider
+than the lime end in every real configuration, so `computeRibbonFrames`'s
+existing taper (which supports narrowing just as naturally as widening)
+does the right thing with no other changes. The departure tangent at this
+end also changed from the hub anchor's own "outward" tangent (which meant
+nothing for a point that's now the midpoint of two different arms'
+bridge) to pointing straight at the lime target, the only direction that
+still means anything there.
+
+Verified in headless Chromium: zero console errors, connector count
+unchanged (20). Screenshots: small solid hub discs now visible at every
+face center without dominating the connectors, and the ribbons clearly
+funnel from a wide flared base down to a narrow twisted point at each
+shared vertex - the reverse of §46's shipped shape.
+
 ## File layout
 
 ```

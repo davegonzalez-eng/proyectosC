@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections, computeThreeCycles } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeHubAnchors, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup, buildHubRingDebug, buildHubRectDebug, buildTristarRectDebug, buildHubEdgeRectDebug, buildTristarArmRectsDebug, buildRectangleConnectorGroup } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeHubAnchors, computeHubEdgeAnchors, buildHubCap, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup, buildHubRingDebug, buildHubRectDebug, buildTristarRectDebug, buildHubEdgeRectDebug, buildTristarArmRectsDebug, buildRectangleConnectorGroup } from './spiralarm.js';
 import { createPerforationTexture, createCoralMazeTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -991,16 +991,16 @@ function rebuild() {
     }
   }
 
-  // Same idea, at the opposite (hub) end of each arm - only "Rectangle
-  // Connect" actually connects anything to these; the debug overlay's own
-  // per-face loop computes hub anchors fresh instead (it doesn't need
-  // them addressable by label).
-  /** @type {Map<string, {tipPosition: THREE.Vector3, tipTangent: THREE.Vector3, tipNormal: THREE.Vector3}>} */
-  const hubAnchorsByLabel = new Map();
+  // Same idea, but for the WIDE "orange" hub-edge bridge each arm's own
+  // Rectangle Connect ribbon starts from (see computeHubEdgeAnchors) - the
+  // debug overlay's own per-face loop computes these fresh instead (it
+  // doesn't need them addressable by label).
+  /** @type {Map<string, {tipPosition: THREE.Vector3, tipNormal: THREE.Vector3, width: number, thickness: number}>} */
+  const edgeAnchorsByLabel = new Map();
   if (params.connectorStyle === 'rectangleConnect') {
     for (const face of faces) {
-      for (const anchor of computeHubAnchors(star2D, face, params)) {
-        hubAnchorsByLabel.set(`F${face.index}-A${anchor.armIndex}`, anchor);
+      for (const anchor of computeHubEdgeAnchors(star2D, face, params)) {
+        edgeAnchorsByLabel.set(`F${face.index}-A${anchor.armIndex}`, anchor);
       }
     }
   }
@@ -1067,6 +1067,27 @@ function rebuild() {
         rimMesh.userData.faceIndex = face.index;
         rimGroup.add(rimMesh);
       }
+    } else if (isShown && params.hideStarArms) {
+      // The star hub itself still needs to be visible even with the arms
+      // replaced by connectors - `buildSolidStar2D`'s own hub disc is
+      // baked into the single fused arms+hub mesh `mapSolidStarToFace`
+      // returns, so with that mesh skipped entirely there'd otherwise be
+      // nothing left at the face center at all. `buildHubCap` (a plain
+      // solid disc, unrelated to the arm field) fills that in on its own.
+      // Deliberately a small nub, NOT `buildSolidStar2D`'s own
+      // `hubRadiusFrac * 1.5` cap radius fallback - that formula assumes a
+      // small hubRadiusFrac with arms covering everything out to it, but
+      // this preset's much larger hubRadiusFrac (0.39, so the connectors'
+      // own wide "orange" ends land well past it) turned the cap into a
+      // dominant disc that swallowed the connectors entirely.
+      const capGeom = buildHubCap(face, {
+        capRadiusFrac: Math.min(Math.max(params.hubRadiusFrac * 0.3, 0.05), 0.12),
+        thickness: params.thickness,
+        bulgeStrength: params.bulgeStrength,
+      });
+      const capMesh = new THREE.Mesh(capGeom, rimMaterial);
+      capMesh.userData.faceIndex = face.index;
+      starGroup.add(capMesh);
     }
   }
 
@@ -1155,14 +1176,14 @@ function rebuild() {
       }
     } else if (params.connectorStyle === 'rectangleConnect') {
       // Rectangle Connect: no star arms at all (see hideStarArms above) -
-      // just a Mobius-twisted ribbon per arm, from that arm's own hub-edge
-      // point to its own tristar touching-point.
+      // just a Mobius-twisted ribbon per arm, from that arm's own wide
+      // hub-edge bridge to its own narrow tristar touching-point.
       for (const triple of threeCycles) {
         const tips = triple.map((label) => tipsByLabel.get(label));
-        const hubAnchors = triple.map((label) => hubAnchorsByLabel.get(label));
-        if (tips.some((t) => !t) || hubAnchors.some((h) => !h)) { missing++; continue; }
+        const edgeAnchors = triple.map((label) => edgeAnchorsByLabel.get(label));
+        if (tips.some((t) => !t) || edgeAnchors.some((h) => !h)) { missing++; continue; }
         const rectGroup = buildRectangleConnectorGroup(
-          tips[0], tips[1], tips[2], hubAnchors[0], hubAnchors[1], hubAnchors[2], { R, ...params }
+          tips[0], tips[1], tips[2], edgeAnchors[0], edgeAnchors[1], edgeAnchors[2], { R, ...params }
         );
         rectGroup.children.forEach((m) => { m.material = sculptureMaterial; });
         extGroup.add(rectGroup);

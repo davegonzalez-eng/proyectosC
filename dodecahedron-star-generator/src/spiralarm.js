@@ -1014,6 +1014,54 @@ export function computeHubAnchors(star2D, face, params = {}) {
 }
 
 /**
+ * The real (non-debug) counterpart to `buildHubEdgeRectDebug`'s outline -
+ * one per arm (`armIndex` = the arm the edge STARTS at, bridging to
+ * `(armIndex + 1) % armCount`), giving the midpoint and full width of the
+ * "orange" bridge between two consecutive arms' hub rectangles (same
+ * far-from-rim short-side selection that function's own doc explains).
+ * Used by `buildRectangleConnectorGroup` as the WIDE end of its taper -
+ * `width` here is the actual bridge span (typically much wider than the
+ * "lime" tristar touching-point's own render width), not a single short
+ * edge's own thickness.
+ * @returns {{armIndex: number, tipPosition: THREE.Vector3, tipNormal: THREE.Vector3, width: number, thickness: number}[]}
+ */
+export function computeHubEdgeAnchors(star2D, face, params = {}) {
+  const { R = 1, bandHalfWidth = 0.22, thickness: armThicknessFrac = 0.015 } = params;
+  const halfW = R * bandHalfWidth;
+  const thick = R * armThicknessFrac;
+  const hubAnchors = computeHubAnchors(star2D, face, params);
+  const tips = computeArmTips(star2D, face, params);
+
+  const farSide = (anchor, tip) => {
+    const tangent = anchor.tipTangent;
+    const radial = anchor.tipNormal;
+    const major = new THREE.Vector3().crossVectors(tangent, radial);
+    if (major.lengthSq() < 1e-10) {
+      major.set(Math.abs(tangent.x) < 0.9 ? 1 : 0, Math.abs(tangent.x) < 0.9 ? 0 : 1, 0);
+      major.addScaledVector(tangent, -major.dot(tangent));
+    }
+    major.normalize();
+    const plus = anchor.tipPosition.clone().addScaledVector(major, halfW);
+    const minus = anchor.tipPosition.clone().addScaledVector(major, -halfW);
+    return plus.distanceToSquared(tip.tipPosition) >= minus.distanceToSquared(tip.tipPosition) ? plus : minus;
+  };
+
+  return hubAnchors.map((anchor, i) => {
+    const next = hubAnchors[(i + 1) % hubAnchors.length];
+    const a = farSide(anchor, tips[i]);
+    const b = farSide(next, tips[(i + 1) % tips.length]);
+    const position = a.clone().add(b).multiplyScalar(0.5);
+    return {
+      armIndex: i,
+      tipPosition: position,
+      tipNormal: position.clone().normalize(),
+      width: a.distanceTo(b),
+      thickness: thick,
+    };
+  });
+}
+
+/**
  * A raised bead tracing every boundary loop of the solid star (outer
  * silhouette AND every gap/hole edge) - the smooth-shaded field-based sheet
  * on its own reads as a flat cutout; a defined rim/bezel along every edge
@@ -2090,30 +2138,29 @@ export function buildSpiralVortexRibbonGroup(tipA, tipB, tipC, params = {}) {
 /**
  * "Rectangle Connect": replaces the star arm entirely with a Mobius-
  * twisted ribbon per arm, running from that arm's own "orange" hub-edge
- * point (see `buildHubEdgeRectDebug` - the far-from-rim short side of its
- * own hub rectangle, the SAME corner that rectangle's own edge-bridge
- * uses) out to that arm's own "lime" tristar touching-point (see
- * `buildTristarArmRectsDebug` - where all 3 bars at the shared vertex
- * would just start touching). No star sheet is drawn at all in this
- * style (`rebuild()` gates the whole star mesh/rim behind
+ * bridge (see `computeHubEdgeAnchors`/`buildHubEdgeRectDebug` - the
+ * far-from-rim short sides of two consecutive arms' hub rectangles,
+ * bridged into one span) out to that arm's own "lime" tristar
+ * touching-point (see `buildTristarArmRectsDebug` - where all 3 bars at
+ * the shared vertex would just start touching). No star sheet is drawn at
+ * all in this style (`rebuild()` gates the whole star mesh/rim behind
  * `params.hideStarArms`) - these ribbons ARE the visible geometry.
  *
- * Reuses the same curve/frame machinery every other spiral-vortex
- * connector does (`spiralVortexPointAt`/`computeRibbonFrames`, including
- * the `halfTwists` option `buildTristarArmRectsDebug`'s "Moebius Connect"
- * precursor introduced) - only the two anchors and the taper between them
- * differ: `startWidth`/`thickness` at the hub end match the orange point's
- * own short-side extent (so there's no gap where the ribbon starts),
- * `endWidthFrac` grows it out to match the lime marker's own render width
- * at the far end.
+ * The orange bridge is the WIDE end and the lime point is the NARROW end
+ * (reported after the first version had this backward, tapering from a
+ * thin peg at the hub out to a wide band at the vertex - a real
+ * mismatch, since the orange bridge's own span is the arm's full hub
+ * width while the lime marker is deliberately a fraction of that, see
+ * `buildTristarArmRectsDebug`'s own `renderWidthFrac`) -
+ * `computeRibbonFrames`'s existing width taper already supports either
+ * direction; `endWidthFrac` here just comes out under 1.
  * @returns {THREE.Group}
  */
-export function buildRectangleConnectorGroup(tipA, tipB, tipC, hubAnchorA, hubAnchorB, hubAnchorC, params = {}) {
+export function buildRectangleConnectorGroup(tipA, tipB, tipC, edgeAnchorA, edgeAnchorB, edgeAnchorC, params = {}) {
   const {
     R = 1,
     bandHalfWidth = 0.22,
     tipWidthFrac = 0.15,
-    thickness: armThicknessFrac = 0.015,
     renderWidthFrac = 0.5,
     touchWidthFrac = 1 / 3,
     moebiusHalfTwists = 1,
@@ -2126,11 +2173,9 @@ export function buildRectangleConnectorGroup(tipA, tipB, tipC, hubAnchorA, hubAn
   const trueWidth = R * bandHalfWidth * tipWidthFrac * 2;
   const renderWidth = trueWidth * renderWidthFrac;
   const touchWidth = trueWidth * touchWidthFrac;
-  const thick = R * armThicknessFrac;
-  const halfW = R * bandHalfWidth;
 
   const tips = [tipA, tipB, tipC];
-  const hubAnchors = [hubAnchorA, hubAnchorB, hubAnchorC];
+  const edgeAnchors = [edgeAnchorA, edgeAnchorB, edgeAnchorC];
 
   let t = 0;
   for (let i = 0; i < 3; i++) {
@@ -2144,30 +2189,26 @@ export function buildRectangleConnectorGroup(tipA, tipB, tipC, hubAnchorA, hubAn
   const group = new THREE.Group();
   for (let i = 0; i < 3; i++) {
     const tip = tips[i];
-    const hubAnchor = hubAnchors[i];
+    const edge = edgeAnchors[i];
     const limePosition = tip.tipPosition.clone().lerp(center, t);
 
-    // The "orange" hub-edge point: same far-from-rim short side
-    // `buildHubEdgeRectDebug` bridges from this exact arm.
-    const majorDir = new THREE.Vector3().crossVectors(hubAnchor.tipTangent, hubAnchor.tipNormal);
-    if (majorDir.lengthSq() < 1e-10) {
-      majorDir.set(Math.abs(hubAnchor.tipTangent.x) < 0.9 ? 1 : 0, Math.abs(hubAnchor.tipTangent.x) < 0.9 ? 0 : 1, 0);
-      majorDir.addScaledVector(hubAnchor.tipTangent, -majorDir.dot(hubAnchor.tipTangent));
-    }
-    majorDir.normalize();
-    const plus = hubAnchor.tipPosition.clone().addScaledVector(majorDir, halfW);
-    const minus = hubAnchor.tipPosition.clone().addScaledVector(majorDir, -halfW);
-    const farSide = plus.distanceToSquared(tip.tipPosition) >= minus.distanceToSquared(tip.tipPosition) ? plus : minus;
-    const hubEndAnchor = { tipPosition: farSide, tipTangent: hubAnchor.tipTangent.clone(), tipNormal: hubAnchor.tipNormal.clone() };
+    // Departs the wide bridge midpoint heading straight for the lime
+    // target - there's no single natural "outward" tangent for a bridge
+    // shared by two different arms the way there is for one arm's own
+    // hub anchor, so this points directly at the only other anchor the
+    // curve actually needs to reach.
+    const toLime = limePosition.clone().sub(edge.tipPosition);
+    const tangent = toLime.lengthSq() > 1e-12 ? toLime.normalize() : tip.tipTangent.clone();
+    const hubEndAnchor = { tipPosition: edge.tipPosition, tipTangent: tangent, tipNormal: edge.tipNormal.clone() };
 
     const shared = {
       turns: moebiusTurns,
       sweepFrac: spiralSweepFrac,
       launchFrac: 0,
       lengthMultiplier: 1,
-      startWidth: thick,
-      endWidthFrac: renderWidth / thick,
-      thickness: thick,
+      startWidth: edge.width,
+      endWidthFrac: renderWidth / edge.width,
+      thickness: edge.thickness,
       halfTwists: moebiusHalfTwists,
     };
     const geom = buildSpiralVortexRibbonArm(hubEndAnchor, limePosition, shared);
