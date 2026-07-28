@@ -289,6 +289,76 @@ export function buildHubCap(face, params = {}) {
 }
 
 /**
+ * Like `buildHubCap`, but a solid 5-sided fan reaching all the way out to
+ * each arm's own "orange" hub-edge bridge point (`computeHubEdgeAnchors`)
+ * instead of a small round disc - for `rectangleConnect`, where each
+ * ribbon's own wide end is anchored AT that exact point, a round disc well
+ * inside it left a visible gap between the hub and the ribbons' true start.
+ * Textured with the same hex-grid material the star arms use (passed in by
+ * the caller), not the plain rim material the round cap used - UV is
+ * recovered by projecting each boundary point back onto the face's own
+ * (U, W) axes, which exactly reconstructs the original grid coordinate for
+ * any in-plane displacement (bulge is along `face.normal`, so it doesn't
+ * affect the U/W dot products) and is only approximate for the smaller
+ * off-plane nudges (tip dip) that a couple of the edge anchors pick up -
+ * close enough for pattern continuity, same tolerance already accepted for
+ * the lime/orange debug markers themselves.
+ * @param {Face} face
+ * @param {Array<{armIndex: number, tipPosition: THREE.Vector3}>} edgeAnchors from `computeHubEdgeAnchors`, one per arm
+ * @param {object} [params]
+ * @param {number} [params.thickness=0.05] slab thickness (fraction of face.R_out), matching the arms' own hub thickness
+ * @returns {THREE.BufferGeometry}
+ */
+export function buildHubPentagonCap(face, edgeAnchors, params = {}) {
+  const { thickness = 0.05 } = params;
+  const R = face.R_out;
+  const halfT = (R * thickness) / 2;
+  const ring = edgeAnchors.slice().sort((a, b) => a.armIndex - b.armIndex).map((a) => a.tipPosition);
+  const n = ring.length;
+  const center = face.center;
+  const uvOf = (p) => ({ u: p.clone().sub(center).dot(face.U), w: p.clone().sub(center).dot(face.W) });
+  const centerUV = uvOf(center);
+
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  const pushLayer = (offset, flip) => {
+    const base = positions.length / 3;
+    const c = center.clone().addScaledVector(face.normal, offset);
+    positions.push(c.x, c.y, c.z);
+    uvs.push(centerUV.u, centerUV.w);
+    for (const p of ring) {
+      const rp = p.clone().addScaledVector(face.normal, offset);
+      const uv = uvOf(p);
+      positions.push(rp.x, rp.y, rp.z);
+      uvs.push(uv.u, uv.w);
+    }
+    for (let i = 0; i < n; i++) {
+      const a = base + 1 + i, b = base + 1 + ((i + 1) % n);
+      if (!flip) indices.push(base, a, b);
+      else indices.push(base, b, a);
+    }
+  };
+  pushLayer(halfT, false);
+  pushLayer(-halfT, true);
+
+  const topBase = 0, botBase = n + 1;
+  for (let i = 0; i < n; i++) {
+    const iNext = (i + 1) % n;
+    const t0 = topBase + 1 + i, t1 = topBase + 1 + iNext;
+    const b0 = botBase + 1 + i, b1 = botBase + 1 + iNext;
+    indices.push(t0, b0, t1, t1, b0, b1);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/**
  * A single spiral band, by itself, reads as one big coil - not a star: the
  * pentagon face's 5-fold identity comes from having 5 arms, one per vertex
  * direction, each curling only part of the way to the center rather than

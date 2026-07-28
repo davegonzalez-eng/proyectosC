@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/three/OrbitControls.js';
 import { RoomEnvironment } from '../vendor/three/RoomEnvironment.js';
 import { buildDodecahedron, computeAdjacentFaceConnections, computeThreeCycles } from './geometry.js';
-import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeHubAnchors, computeHubEdgeAnchors, buildHubCap, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup, buildHubRingDebug, buildHubRectDebug, buildTristarRectDebug, buildHubEdgeRectDebug, buildTristarArmRectsDebug, buildRectangleConnectorGroup } from './spiralarm.js';
+import { buildSolidStar2D, mapSolidStarToFace, computeArmTips, computeHubAnchors, computeHubEdgeAnchors, buildHubPentagonCap, buildHornArc, buildStarRim, mapArmCenterlineWithNormal, hornTriangleCenter, buildSnapHubGroup, buildSpiralVortexGroup, buildSpiralVortexRibbonGroup, buildHubRingDebug, buildHubRectDebug, buildTristarRectDebug, buildHubEdgeRectDebug, buildTristarArmRectsDebug, buildRectangleConnectorGroup } from './spiralarm.js';
 import { createPerforationTexture, createCoralMazeTexture } from './hextexture.js';
 
 const container = document.getElementById('scene-container');
@@ -519,19 +519,29 @@ const PRESETS = {
   // Mobius-twisted ribbon per arm bridging that arm's own hub-edge point
   // to its own tristar touching-point (see buildRectangleConnectorGroup).
   rectangleConnect: {
-    starRotationDeg: 14, tipScale: 1.14, turns: 0.1, hubRadiusFrac: 0.39,
-    bandHalfWidth: 0.305, tipWidthFrac: 0.57, widthTaperPower: 0.9,
-    thickness: 0.01, tipThicknessFrac: 0.17, bulgeStrength: 0.16,
-    tipDipStrength: 0.29, surfTwistDeg: -3, filletFrac: 0.1, subdivisions: 3,
-    tipBendStrength: 0.12, tipBendTwistDeg: 37, tipBendPower: 5,
-    showExtensions: true, showRim: false,
-    fieldGrid: 144,
-    singleFaceMode: false, connectorStyle: 'rectangleConnect', snapEnabled: false,
-    hideStarArms: true,
-    moebiusHalfTwists: 1, moebiusTurns: 0.06, spiralSweepFrac: 0.04,
-    renderWidthFrac: 0.5, touchWidthFrac: 1 / 3,
+    starRotationDeg: 30, tipScale: 1.32, turns: 0.1, hubRadiusFrac: 0.45,
+    bandHalfWidth: 0.305, tipWidthFrac: 0.16, widthTaperPower: 0.95,
+    thickness: 0.01, tipThicknessFrac: 0.2, bulgeStrength: 0.16,
+    tipDipStrength: 0.29, surfTwistDeg: 90, filletFrac: 0.12, subdivisions: 3,
+    tipBendStrength: 0.12, tipBendTwistDeg: -8, tipBendPower: 5.5,
+    showExtensions: true, extLengthFactor: 0.55, extDepthFraction: 0.95,
+    extArcWidthFrac: 0.04, extClothoid: 1,
+    showRim: false, rimWidthFrac: 0.02, rimProudFrac: 0.02,
     material: 'golden', pattern: 'hex', holeSize: 0.24, patternScale: 3.2,
     lampMode: false, lampIntensity: 19,
+    debugFacePick: true, debugConnections: false, debugAuxRects: false,
+    clipEnabled: false, clipAxis: 'z', clipOffset: -0.22, clipFlip: false,
+    flyoverMode: false, flyoverSpeed: 0.03,
+    singleFaceMode: false, singleFaceIndex: 0,
+    connectorStyle: 'rectangleConnect', snapEnabled: false,
+    snapHoleRadiusFrac: 0.026, snapHoleInsetFrac: 0.11,
+    hubBodyRadiusFrac: 0.035, snapPegRadiusFrac: 0.024, snapPegLengthFrac: 0.16,
+    spiralTurns: 0.22, spiralSweepFrac: 0, spiralLaunchFrac: 0.15,
+    spiralLengthMultiplier: 1, spiralArcWidthFrac: 0.035,
+    spiralRibbonWidthFrac: 0.09, spiralRibbonThicknessFrac: 0.012,
+    moebiusHalfTwists: 1, moebiusTurns: 0,
+    touchWidthFrac: 1 / 3, renderWidthFrac: 0.5,
+    hideStarArms: true, fieldGrid: 144,
   },
 };
 
@@ -1072,20 +1082,16 @@ function rebuild() {
       // replaced by connectors - `buildSolidStar2D`'s own hub disc is
       // baked into the single fused arms+hub mesh `mapSolidStarToFace`
       // returns, so with that mesh skipped entirely there'd otherwise be
-      // nothing left at the face center at all. `buildHubCap` (a plain
-      // solid disc, unrelated to the arm field) fills that in on its own.
-      // Deliberately a small nub, NOT `buildSolidStar2D`'s own
-      // `hubRadiusFrac * 1.5` cap radius fallback - that formula assumes a
-      // small hubRadiusFrac with arms covering everything out to it, but
-      // this preset's much larger hubRadiusFrac (0.39, so the connectors'
-      // own wide "orange" ends land well past it) turned the cap into a
-      // dominant disc that swallowed the connectors entirely.
-      const capGeom = buildHubCap(face, {
-        capRadiusFrac: Math.min(Math.max(params.hubRadiusFrac * 0.3, 0.05), 0.12),
-        thickness: params.thickness,
-        bulgeStrength: params.bulgeStrength,
-      });
-      const capMesh = new THREE.Mesh(capGeom, rimMaterial);
+      // nothing left at the face center at all. A solid pentagon
+      // (`buildHubPentagonCap`) fills that in, reaching all the way out to
+      // each arm's own "orange" hub-edge bridge point - a small round disc
+      // (the original fix) left a visible gap between the hub and the
+      // ribbons' own true (wide) start. Textured with the star's own hex
+      // material, not the plain rim material the round cap used, so the hub
+      // reads as a continuation of the same surface instead of a bare patch.
+      const edgeAnchors = computeHubEdgeAnchors(star2D, face, params);
+      const capGeom = buildHubPentagonCap(face, edgeAnchors, { thickness: params.thickness });
+      const capMesh = new THREE.Mesh(capGeom, sculptureMaterial);
       capMesh.userData.faceIndex = face.index;
       starGroup.add(capMesh);
     }

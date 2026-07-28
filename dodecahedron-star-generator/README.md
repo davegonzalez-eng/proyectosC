@@ -2699,6 +2699,46 @@ Verified in headless Chromium: zero console errors, connector count
 unchanged (20/20 tips, 20 connectors). Screenshot confirms the same
 wide-orange-to-narrow-lime funnel taper as §47, now spinning the other way.
 
+## 49. Rectangle Connect: new tuned defaults + solid pentagon hub (was a round disc)
+
+Two changes to `rectangleConnect`, both by request.
+
+**New default values.** The preset bundle now sets every param from a
+user-supplied table (`starRotationDeg: 30`, `tipScale: 1.32`,
+`hubRadiusFrac: 0.45`, `surfTwistDeg: 90`, `tipBendTwistDeg: -8`,
+`tipBendPower: 5.5`, `moebiusTurns: 0`, `spiralSweepFrac: 0`,
+`tipWidthFrac: 0.16`, and every other shape/appearance/debug/flyover/snap
+param besides) explicitly, rather than only the subset that differed from
+`odysseyThickBands` before - `applyPreset` merges a bundle onto whatever
+params are already set (`Object.assign`), so a value this preset doesn't
+mention keeps leaking in from a previously-selected preset instead of
+resetting to the requested table.
+
+**Solid pentagon hub.** §47's `buildHubCap` round disc (radius
+`hubRadiusFrac * 0.3`, clamped 0.05-0.12) sat well inside the ribbons' own
+wide "orange" starting point, leaving a visible gap between the hub and
+where a ribbon actually begins. New `buildHubPentagonCap` (`spiralarm.js`)
+replaces it with a solid 5-sided fan whose boundary vertices are the exact
+same 5 `computeHubEdgeAnchors` points each ribbon's own wide end is
+anchored to - so the hub now reaches all the way out to every ribbon's true
+start, with no gap regardless of `hubRadiusFrac`. It's also built with the
+star's own hex-pattern material (`sculptureMaterial`) instead of the round
+cap's plain `rimMaterial`, so it reads as a continuation of the same
+textured surface rather than a bare patch; UV is recovered by projecting
+each boundary point back onto the face's own (U, W) axes, which exactly
+reconstructs the grid coordinate `mapStarPoint` used for any in-plane
+displacement (bulge is purely along `face.normal`) and is only approximate
+for the smaller off-plane nudges (tip dip) a couple of the edge anchors
+pick up - close enough for pattern continuity, the same tolerance already
+accepted for the lime/orange debug markers themselves.
+
+Verified in headless Chromium: zero console errors across `stardream1`,
+`starOdyssey`, `odysseyThickBands`, and `rectangleConnect` (no regressions),
+connector count unchanged (20/20), and the new default param values read
+back correctly from `window.__spiralDodeca.params`. Screenshot confirms
+solid hex-textured pentagons filling every face center, flush against the
+ribbons' own wide ends with no visible gap.
+
 ## File layout
 
 ```
